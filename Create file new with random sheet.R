@@ -3,6 +3,9 @@
 # =============================================================================
 # Copies the NULL template Excel file and fills the Data sheet with random
 # values appropriate for each column's data type. Overwrites existing Testfile.
+#
+# For EXCLUSIVE groups (only one option can be selected), exactly one dummy
+# column gets 1 (Ja) and the rest get 2 (Nej) per row.
 
 library(openxlsx)
 library(readxl)
@@ -41,15 +44,44 @@ data_types   <- lookup_sheet[["Data Type"]]
 var_codes <- setNames(value_codes, var_names_vv)
 var_types <- setNames(data_types, var_names_vv)
 
+# =============================================================================
+# EXCLUSIVE GROUPS - only one option can be selected per row
+# =============================================================================
+# These match the classification in Data Management.R
+# To adjust, edit this list (must match Data Management.R)
+
+exclusive_groups <- c(
+  "VAR04", "VAR05", "VAR08", "VAR09", "VAR11",
+  "VAR13", "VAR14", "VAR15", "VAR16", "VAR17", "VAR18",
+  paste0("VAR", 25:38),   # HAD items
+  paste0("VAR", 41:44),   # ISI items
+  paste0("VAR", 45:48),   # Physical activity
+  paste0("VAR", 49:52),   # Smoking/snus
+  "VAR53"
+)
+
+# NON-EXCLUSIVE GROUPS - multiple options can be selected
+non_exclusive_groups <- c("VAR12", "VAR20")
+
+# MATRIX GROUPS - independent items with their own scales
+matrix_groups <- c("VAR10", "VAR19", "VAR21", "VAR22", "VAR23", "VAR24", "VAR39", "VAR40")
+
+# =============================================================================
+
 # Function to parse Value Codes and extract valid numeric values
 parse_value_codes <- function(codes) {
   if (is.na(codes) || codes == "none" || codes == "") return(NULL)
-  # Extract numbers before " = " (e.g., "1 = Ja\r\n2 = Nej" -> c(1, 2))
   matches <- gregexpr("(\\d+)\\s*=", codes)
   nums <- regmatches(codes, matches)[[1]]
   nums <- as.integer(gsub("\\s*=", "", nums))
   if (length(nums) > 0) return(nums)
   return(NULL)
+}
+
+# Find all columns belonging to each exclusive group
+get_group_columns <- function(base_name, col_names) {
+  pattern <- paste0("^", base_name, "_\\d+$")
+  col_names[grepl(pattern, col_names)]
 }
 
 # Settings
@@ -60,25 +92,64 @@ num_rows <- 100
 data_sheet <- data.frame(matrix(NA, nrow = num_rows, ncol = num_cols))
 colnames(data_sheet) <- col_names
 
+# Track which columns have been filled (for exclusive groups)
+filled_cols <- rep(FALSE, num_cols)
+names(filled_cols) <- col_names
+
+# =============================================================================
+# STEP 1: Fill exclusive groups (one Ja per row, rest Nej)
+# =============================================================================
+for (grp in exclusive_groups) {
+  grp_cols <- get_group_columns(grp, col_names)
+  if (length(grp_cols) == 0) next
+
+  n_options <- length(grp_cols)
+  col_indices <- match(grp_cols, col_names)
+
+  # For each row, randomly select one column to be 1 (Ja), rest are 2 (Nej)
+  for (row in 1:num_rows) {
+    selected <- sample(1:n_options, 1)
+    for (j in seq_along(col_indices)) {
+      data_sheet[row, col_indices[j]] <- ifelse(j == selected, 1, 2)
+    }
+  }
+
+  filled_cols[grp_cols] <- TRUE
+}
+
+# =============================================================================
+# STEP 2: Fill non-exclusive groups (each column independently 1 or 2)
+# =============================================================================
+for (grp in non_exclusive_groups) {
+  grp_cols <- get_group_columns(grp, col_names)
+  if (length(grp_cols) == 0) next
+
+  for (col in grp_cols) {
+    idx <- match(col, col_names)
+    data_sheet[[idx]] <- sample(1:2, num_rows, replace = TRUE)
+    filled_cols[col] <- TRUE
+  }
+}
+
+# =============================================================================
+# STEP 3: Fill remaining columns based on type
+# =============================================================================
 for (i in seq_along(col_names)) {
+  if (filled_cols[i]) next  # Already filled
+
   var_name  <- col_names[i]
   codes     <- var_codes[var_name]
   data_type <- var_types[var_name]
-
-  # Parse valid values from Value Codes
   valid_values <- parse_value_codes(codes)
 
-  # Special cases first
   if (var_name == "ID") {
     data_sheet[[i]] <- 1:num_rows
 
   } else if (var_name == "Svarstillfälle" || (!is.na(data_type) && data_type == "Date")) {
-    # Date column
     random_days <- sample(0:364, num_rows, replace = TRUE)
     data_sheet[[i]] <- as.Date("2025-01-01") + random_days
 
   } else if (!is.na(data_type) && data_type == "String") {
-    # String columns
     if (grepl("^VAR19", var_name)) {
       data_sheet[[i]] <- ifelse(runif(num_rows) < 0.2,
                                 sample(c("Paracetamol", "Ibuprofen", "Tramadol", "Morfin"),
@@ -93,7 +164,6 @@ for (i in seq_along(col_names)) {
     }
 
   } else if (var_name == "VAR02") {
-    # Personnummer
     birth_years <- sample(1950:2005, num_rows, replace = TRUE)
     birth_months <- sprintf("%02d", sample(1:12, num_rows, replace = TRUE))
     birth_days <- sprintf("%02d", sample(1:28, num_rows, replace = TRUE))
@@ -102,19 +172,13 @@ for (i in seq_along(col_names)) {
     data_sheet[[i]] <- as.numeric(paste0(birth_years, birth_months, birth_days, suffix))
 
   } else if (var_name == "VAR06") {
-    # Length in cm
     data_sheet[[i]] <- round(rnorm(num_rows, mean = 170, sd = 10))
 
   } else if (var_name == "VAR07") {
-    # Weight in kg
     data_sheet[[i]] <- round(rnorm(num_rows, mean = 75, sd = 15))
 
-  } else if (!is.null(valid_values)) {
-    # Use parsed values from Value Codes
-    data_sheet[[i]] <- sample(valid_values, num_rows, replace = TRUE)
-
   } else if (grepl("^VAR10_", var_name)) {
-    # Employment matrix: 1-4
+    # Employment matrix: 1-4 (25/50/75/100%)
     data_sheet[[i]] <- sample(1:4, num_rows, replace = TRUE)
 
   } else if (grepl("^VAR21_", var_name)) {
@@ -133,6 +197,9 @@ for (i in seq_along(col_names)) {
     # SCI-93 and ISI: 1-5 scale
     data_sheet[[i]] <- sample(1:5, num_rows, replace = TRUE)
 
+  } else if (!is.null(valid_values)) {
+    data_sheet[[i]] <- sample(valid_values, num_rows, replace = TRUE)
+
   } else {
     # Default: 1 or 2
     data_sheet[[i]] <- sample(1:2, num_rows, replace = TRUE)
@@ -149,3 +216,5 @@ saveWorkbook(wb, output_file, overwrite = TRUE)
 
 cat("Created", output_file, "with", num_rows, "rows of random data\n")
 cat("Columns filled:", num_cols, "\n")
+cat("Exclusive groups:", length(exclusive_groups), "- one selection per row\n")
+cat("Non-exclusive groups:", length(non_exclusive_groups), "- independent selections\n")
