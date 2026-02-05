@@ -86,7 +86,7 @@ get_group_columns <- function(base_name, col_names) {
 
 # Settings
 set.seed(2026)
-num_rows <- 100
+num_rows <- 1000
 
 # Generate random data for each column
 data_sheet <- data.frame(matrix(NA, nrow = num_rows, ncol = num_cols))

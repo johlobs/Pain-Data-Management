@@ -55,7 +55,7 @@ library(stringr)
 # == Load data ================================================================
 
 path <- "C:/Users/nepet/Documents/Data Management Sahlgrenska Academy"
-f    <- file.path(path, "NULLdata_MenWomen_Baseline_Facebook_250401.xlsx")
+f    <- file.path(path, "Testfile.xlsx")
 
 # VariableView sheet: codebook with variable names, descriptive labels,
 # question types (Check Boxes / Matrix / etc.), value codes, and missing codes.
@@ -65,90 +65,30 @@ vv <- read_excel(f, sheet = "VariableView")
 # replace the file path with the real dataset when available.
 d1 <- read_excel(f, sheet = "Data")
 
-# == Build look-up table from VariableView ====================================
+# =============================================================================
+# VARIABLE GROUP CLASSIFICATION
+# =============================================================================
 #
-# Extracts one row per variable with all metadata needed for classification,
-# codebook generation, and labelling.
-
-label_table <- tibble(
-  variable  = vv[["Variable Name"]],
-  label     = vv[["Label"]],
-  type      = vv[["Type"]],       # e.g. "Multiple-Choice - Check Boxes"
-  data_type = vv[["Data Type"]],   # e.g. "Numeric", "String", "Date"
-  values    = vv[["Value Codes"]], # e.g. "1 = Ja\r\n2 = Nej"
-  missing   = vv[["Missing Code"]]
-)
-
-# == Correct Type column: "Multiple-Choice" -> "One-Choice" for exclusive ======
+# Variables with pattern VARnn_mm are grouped by base name (VARnn).
+# Each group is classified into one of three categories that determine
+# how the data is processed:
 #
-# The Sunet Survey export marks all checkbox-style questions as "Multiple-Choice"
-# even when the questionnaire only allows one selection. This section creates a
-# corrected Type column based on researcher verification of the questionnaire.
+#   EXCLUSIVE     - Only one option selected (radio button).
+#                   Collapsed into single column (e.g., VAR04 = 1 or 2).
 #
-# To adjust classifications, edit the exclusive_groups vector below.
-
-# Groups confirmed as EXCLUSIVE (only one option can be selected):
-# - VAR04: Q1a juridiskt kön (Man/Kvinna)
-# - VAR05: Q1b könsidentitet (Man/Kvinna/Annat)
-# - VAR08: Q4 utbildning
-# - VAR09: Q5 födelseland
-# - VAR11: Q7a smärta senaste 7 dagar (Ja/Nej)
-# - VAR13: Q7c NRS medel 7d (0-10 scale)
-# - VAR14: Q8 NRS vila 7d (0-10 scale)
-# - VAR15: Q9 NRS rörelse 7d (0-10 scale)
-# - VAR16: Q10 smärtfrekvens
-# - VAR17: Q11 smärtduration
-# - VAR18: Q12 periodisk/ihållande
-# - VAR25-VAR38: HAD items (4 Likert options each)
-# - VAR41-VAR44: ISI items (5 options each)
-# - VAR45-VAR48: Physical activity items
-# - VAR49-VAR52: Smoking/snus items
-# - VAR53: Q33 kontakt framtida studier
-
-exclusive_groups <- c(
-  "VAR04", "VAR05", "VAR08", "VAR09", "VAR11",
-  "VAR13", "VAR14", "VAR15", "VAR16", "VAR17", "VAR18",
-  paste0("VAR", 25:38),   # HAD items
-  paste0("VAR", 41:44),   # ISI items
-  paste0("VAR", 45:48),   # Physical activity
-  paste0("VAR", 49:52),   # Smoking/snus
-  "VAR53"
-)
-
-# Create Type_corrected: change "Multiple-Choice - Check Boxes" to
-# "One-Choice - Check Boxes" for variables in exclusive groups
-label_table <- label_table %>%
-  mutate(
-    base = sub("_.*", "", variable),
-    type_corrected = ifelse(
-      base %in% exclusive_groups & grepl("Multiple-Choice", type),
-      gsub("Multiple-Choice", "One-Choice", type),
-      type
-    )
-  ) %>%
-  select(-base)
-
-# == Identify dummy groups (VARnn_nn columns) =================================
+#   NON-EXCLUSIVE - Multiple options can be selected (checkbox).
+#                   Kept as separate binary columns, recoded to 0/1.
 #
-# Columns named VARnn (no underscore) are standalone variables.
-# Columns named VARnn_mm belong to a group identified by the base name VARnn.
-# This step finds all groups and attaches their base name.
-
-dummy_cols <- label_table %>%
-  filter(grepl("^VAR[0-9]+_", variable))
-
-dummy_cols <- dummy_cols %>%
-  mutate(base = sub("_.*", "", variable))
-
-# == Classify groups: mutually exclusive vs non-exclusive =====================
+#   MATRIX        - Independent questions sharing a base name.
+#                   Left unchanged (not dummies).
 #
-# Manual classification based on PainSensPROM_Baseline_DataManagement docx
+# Classification based on PainSensPROM_Baseline_DataManagement docx
 # and verified against Enkät_T1a_Gen_230102.pdf.
 #
-# To reclassify a group, move it between the three vectors below.
+# TO RECLASSIFY: move variable between the three vectors below.
+# =============================================================================
 
 # EXCLUSIVE: only one option can be selected per respondent.
-# These will be collapsed into a single numeric column.
 exclusive <- c(
   "VAR04",          # Q1a juridiskt kön (sex): Man / Kvinna
   "VAR05",          # Q1b könsidentitet (sex_id): Man / Kvinna / Annat
@@ -191,14 +131,12 @@ exclusive <- c(
 )
 
 # NON-EXCLUSIVE: multiple options can be selected simultaneously.
-# These stay as separate binary columns, recoded from 1=Ja/2=Nej to 1/0.
 non_exclusive <- c(
   "VAR12",          # Q7b smärtlokalisationer (45 body regions, mark all)
   "VAR20"           # Q14 behandlingsåtgärder (multiple treatments possible)
 )
 
 # MATRIX: each sub-item is an independent variable with its own response scale.
-# These are NOT dummies — they are left completely unchanged.
 matrix_groups <- c(
   "VAR10",          # Q6 arbetslivssituation: each sub-item rated 25/50/75/100%
   "VAR19",          # Q13 smärtläkemedel: free text per medication
@@ -210,13 +148,37 @@ matrix_groups <- c(
   "VAR40"           # Q22 sömnproblem ISI: each sleep item rated 1-5
 )
 
-# Summarise each group: count sub-items, record type, extract question stem.
-group_info <- dummy_cols %>%
+# == Build look-up table from VariableView ====================================
+#
+# Creates label_table with one row per variable, including:
+#   - base: group name extracted from variable (VAR04_1 -> VAR04)
+
+label_table <- tibble(
+  variable  = vv[["Variable Name"]],
+  label     = vv[["Label"]],
+  type      = vv[["Type"]],       # e.g. "Multiple-Choice - Check Boxes"
+  data_type = vv[["Data Type"]],   # e.g. "Numeric", "String", "Date"
+  values    = vv[["Value Codes"]], # e.g. "1 = Ja\r\n2 = Nej"
+  missing   = vv[["Missing Code"]]
+) %>%
+  mutate(
+    # Extract base name: VAR04_1 -> VAR04, VAR12_35 -> VAR12
+    base = sub("_.*", "", variable)
+  )
+
+# == Build group summary ======================================================
+#
+# Filters to dummy columns (VARnn_mm pattern) and summarizes each group:
+#   - n_items: number of sub-columns in the group
+#   - class: exclusive / non_exclusive / matrix (from classification above)
+#   - question: the question stem extracted from the label
+
+group_info <- label_table %>%
+  filter(grepl("^VAR[0-9]+_", variable)) %>%
   group_by(base) %>%
   summarise(
     n_items    = n(),
     first_type = first(type),
-    # Question stem = label text before the " - option" suffix
     question   = sub(" - .*", "", first(label)) %>%
                  str_replace_all("\\r\\n", " ") %>%
                  str_trim(),
@@ -226,8 +188,12 @@ group_info <- dummy_cols %>%
     base %in% exclusive     ~ "exclusive",
     base %in% non_exclusive ~ "non_exclusive",
     base %in% matrix_groups ~ "matrix",
-    TRUE                    ~ "UNCLASSIFIED"  # triggers warning below
+    TRUE                    ~ "UNCLASSIFIED"
   ))
+
+# Extract base names by class (used by multiple functions below)
+exclusive_bases     <- group_info$base[group_info$class == "exclusive"]
+non_exclusive_bases <- group_info$base[group_info$class == "non_exclusive"]
 
 # == Verify classifications ===================================================
 #
@@ -246,7 +212,7 @@ group_info <- dummy_cols %>%
 #   5. Exclusive group with >10 sub-items (unusual for single-select;
 #      legitimate for NRS 0-10 scales, but worth a second look).
 
-verify_classification <- function(group_info, dummy_cols) {
+verify_classification <- function(group_info) {
   warnings <- character(0)
 
   uncl <- group_info %>% filter(class == "UNCLASSIFIED")
@@ -300,7 +266,7 @@ verify_classification <- function(group_info, dummy_cols) {
   invisible(warnings)
 }
 
-verification_warnings <- verify_classification(group_info, dummy_cols)
+verification_warnings <- verify_classification(group_info)
 
 cat("\nGroup classification:\n")
 print(as.data.frame(group_info[, c("base", "n_items", "class")]), row.names = FALSE)
@@ -316,10 +282,8 @@ print(as.data.frame(group_info[, c("base", "n_items", "class")]), row.names = FA
 # The option_label is extracted from the VariableView label: the text after
 # the last " - " separator (e.g. "...juridiskt kön? - Man" -> "Man").
 
-build_codebook_exclusive <- function(dummy_cols, group_info) {
-  exclusive_bases <- group_info$base[group_info$class == "exclusive"]
-
-  codebook <- dummy_cols %>%
+build_codebook_exclusive <- function(label_table, exclusive_bases) {
+  codebook <- label_table %>%
     filter(base %in% exclusive_bases) %>%
     mutate(
       sub_index = as.integer(sub("^VAR[0-9]+_", "", variable)),
@@ -331,18 +295,16 @@ build_codebook_exclusive <- function(dummy_cols, group_info) {
   return(codebook)
 }
 
-codebook_exclusive <- build_codebook_exclusive(dummy_cols, group_info)
+codebook_exclusive <- build_codebook_exclusive(label_table, exclusive_bases)
 
 # == Build codebook for non-exclusive groups ==================================
 #
 # These columns stay in the dataset as separate binary variables, but the
 # codebook documents what each column represents (e.g. VAR12_1 = body region 1).
 
-build_codebook_non_exclusive <- function(dummy_cols, group_info) {
-  ne_bases <- group_info$base[group_info$class == "non_exclusive"]
-
-  codebook <- dummy_cols %>%
-    filter(base %in% ne_bases) %>%
+build_codebook_non_exclusive <- function(label_table, non_exclusive_bases) {
+  codebook <- label_table %>%
+    filter(base %in% non_exclusive_bases) %>%
     mutate(
       option_label = str_replace_all(label, "\\r\\n", " ") %>%
                      sub("^.* - ", "", .)
@@ -352,7 +314,7 @@ build_codebook_non_exclusive <- function(dummy_cols, group_info) {
   return(codebook)
 }
 
-codebook_non_exclusive <- build_codebook_non_exclusive(dummy_cols, group_info)
+codebook_non_exclusive <- build_codebook_non_exclusive(label_table, non_exclusive_bases)
 
 # == Combine mutually exclusive dummies into single columns ===================
 #
@@ -364,9 +326,7 @@ codebook_non_exclusive <- build_codebook_non_exclusive(dummy_cols, group_info)
 #     conflicts are easy to find and investigate.
 #   - Removes the original dummy columns after combining.
 
-combine_exclusive <- function(d1, codebook_exclusive, group_info) {
-  exclusive_bases <- group_info$base[group_info$class == "exclusive"]
-
+combine_exclusive <- function(d1, codebook_exclusive, exclusive_bases) {
   for (b in exclusive_bases) {
     grp <- codebook_exclusive %>% filter(base == b)
     member_cols <- grp$variable
@@ -415,7 +375,7 @@ recode_non_exclusive <- function(d1, codebook_non_exclusive) {
 # - Standalone and matrix columns get the full label from VariableView.
 # - Combined exclusive columns get the question stem as their label.
 
-apply_labels <- function(d1, label_table, codebook_exclusive, group_info) {
+apply_labels <- function(d1, label_table, group_info, exclusive_bases) {
   lookup <- setNames(
     str_replace_all(label_table$label, "\\r\\n", " "),
     label_table$variable
@@ -423,7 +383,6 @@ apply_labels <- function(d1, label_table, codebook_exclusive, group_info) {
   matched <- intersect(names(d1), names(lookup))
   var_label(d1[matched]) <- lookup[matched]
 
-  exclusive_bases <- group_info$base[group_info$class == "exclusive"]
   for (b in exclusive_bases) {
     if (b %in% names(d1)) {
       q <- group_info$question[group_info$base == b]
@@ -442,8 +401,7 @@ apply_labels <- function(d1, label_table, codebook_exclusive, group_info) {
 #
 # With 0 data rows (NULL template), this check is skipped.
 
-verify_exclusive_data <- function(d1, group_info) {
-  exclusive_bases <- group_info$base[group_info$class == "exclusive"]
+verify_exclusive_data <- function(d1, exclusive_bases) {
   present <- intersect(exclusive_bases, names(d1))
 
   if (length(present) == 0 || nrow(d1) == 0) {
@@ -485,6 +443,19 @@ verify_exclusive_data <- function(d1, group_info) {
 d1$VAR07[d1$ID == 7]     <- 95   # weight 995 -> 95 kg
 d1$VAR15_8[d1$ID == 2005] <- 2   # old_ID 4: value 21 -> 2 (Nej)
 
+# Fix missing legal sex (VAR04) by deriving from personnummer (VAR02)
+# Swedish personnummer: second-to-last digit is odd for men, even for women
+# VAR04_1 = Man, VAR04_2 = Kvinna; value 1 = Ja, 2 = Nej
+sex_missing <- (d1$VAR04_1 != 1 & d1$VAR04_2 != 1) |
+               (is.na(d1$VAR04_1) & is.na(d1$VAR04_2))
+if (any(sex_missing, na.rm = TRUE)) {
+  pnr_sex_digit <- (d1$VAR02 %/% 10) %% 10  # second-to-last digit
+  is_woman <- pnr_sex_digit %% 2 == 0
+  # Set VAR04_1 (Man) and VAR04_2 (Kvinna) based on personnummer
+  d1$VAR04_1[sex_missing] <- ifelse(is_woman[sex_missing], 2, 1)  # 2=Nej if woman, 1=Ja if man
+  d1$VAR04_2[sex_missing] <- ifelse(is_woman[sex_missing], 1, 2)  # 1=Ja if woman, 2=Nej if man
+}
+
 # == 2. Demographics =========================================================
 
 # age: from personnummer (VAR02) and survey date (Svarstillfälle).
@@ -498,11 +469,8 @@ d1$age <- current_year - d1$birthyear
 d1$BIN_persnr <- NULL
 d1$birthyear  <- NULL
 
-# sex: 0 = man, 1 = woman (VAR04)
+# sex: 0 = man, 1 = woman (VAR04, already corrected in data adjustments)
 d1$sex <- (2 - d1$VAR04_1) + 2 * (2 - d1$VAR04_2) - 1
-d1$sex[d1$ID == 207] <- 1   # woman (from personnummer)
-d1$sex[d1$ID == 281] <- 0   # man   (from personnummer)
-d1$sex[d1$ID == 590] <- 1   # woman (from personnummer)
 
 # sex_id: 0 = man, 1 = woman, 2 = other (VAR05)
 d1$sex_id <- (2 - d1$VAR05_1) + 2 * (2 - d1$VAR05_2) +
@@ -531,8 +499,8 @@ d1$origin <- (2 - d1$VAR09_1) + 2 * (2 - d1$VAR09_2) +
 # == 3. Employment (VAR10 matrix) =============================================
 # Recode from 1-4 scale to percentage (25/50/75/100).
 
-var10_cols <- grep("^VAR10_", names(d1), value = TRUE)
-for (col in var10_cols) d1[[col]] <- d1[[col]] * 25
+occupation_cols <- grep("^VAR10_", names(d1), value = TRUE)
+for (col in occupation_cols) d1[[col]] <- d1[[col]] * 25
 
 # == 4. Pain variables ========================================================
 
@@ -846,14 +814,14 @@ d1$ant_snuff <- (2 - d1$VAR52_1) + 2 * (2 - d1$VAR52_2) +
   3 * (2 - d1$VAR52_3)
 d1$ant_snuff[d1$snuff < 3] <- 0
 
-rm(current_date, current_year, var10_cols, col)
+rm(current_date, current_year, occupation_cols, col)
 
 # == Run pipeline =============================================================
 
-d1 <- combine_exclusive(d1, codebook_exclusive, group_info)
+d1 <- combine_exclusive(d1, codebook_exclusive, exclusive_bases)
 d1 <- recode_non_exclusive(d1, codebook_non_exclusive)
-d1 <- apply_labels(d1, label_table, codebook_exclusive, group_info)
-verify_exclusive_data(d1, group_info)
+d1 <- apply_labels(d1, label_table, group_info, exclusive_bases)
+verify_exclusive_data(d1, exclusive_bases)
 
 # == Inspect results ==========================================================
 #
