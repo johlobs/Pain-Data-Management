@@ -79,6 +79,55 @@ label_table <- tibble(
   missing   = vv[["Missing Code"]]
 )
 
+# == Correct Type column: "Multiple-Choice" -> "One-Choice" for exclusive ======
+#
+# The Sunet Survey export marks all checkbox-style questions as "Multiple-Choice"
+# even when the questionnaire only allows one selection. This section creates a
+# corrected Type column based on researcher verification of the questionnaire.
+#
+# To adjust classifications, edit the exclusive_groups vector below.
+
+# Groups confirmed as EXCLUSIVE (only one option can be selected):
+# - VAR04: Q1a juridiskt kön (Man/Kvinna)
+# - VAR05: Q1b könsidentitet (Man/Kvinna/Annat)
+# - VAR08: Q4 utbildning
+# - VAR09: Q5 födelseland
+# - VAR11: Q7a smärta senaste 7 dagar (Ja/Nej)
+# - VAR13: Q7c NRS medel 7d (0-10 scale)
+# - VAR14: Q8 NRS vila 7d (0-10 scale)
+# - VAR15: Q9 NRS rörelse 7d (0-10 scale)
+# - VAR16: Q10 smärtfrekvens
+# - VAR17: Q11 smärtduration
+# - VAR18: Q12 periodisk/ihållande
+# - VAR25-VAR38: HAD items (4 Likert options each)
+# - VAR41-VAR44: ISI items (5 options each)
+# - VAR45-VAR48: Physical activity items
+# - VAR49-VAR52: Smoking/snus items
+# - VAR53: Q33 kontakt framtida studier
+
+exclusive_groups <- c(
+  "VAR04", "VAR05", "VAR08", "VAR09", "VAR11",
+  "VAR13", "VAR14", "VAR15", "VAR16", "VAR17", "VAR18",
+  paste0("VAR", 25:38),   # HAD items
+  paste0("VAR", 41:44),   # ISI items
+  paste0("VAR", 45:48),   # Physical activity
+  paste0("VAR", 49:52),   # Smoking/snus
+  "VAR53"
+)
+
+# Create Type_corrected: change "Multiple-Choice - Check Boxes" to
+# "One-Choice - Check Boxes" for variables in exclusive groups
+label_table <- label_table %>%
+  mutate(
+    base = sub("_.*", "", variable),
+    type_corrected = ifelse(
+      base %in% exclusive_groups & grepl("Multiple-Choice", type),
+      gsub("Multiple-Choice", "One-Choice", type),
+      type
+    )
+  ) %>%
+  select(-base)
+
 # == Identify dummy groups (VARnn_nn columns) =================================
 #
 # Columns named VARnn (no underscore) are standalone variables.
