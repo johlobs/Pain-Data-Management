@@ -1,3 +1,12 @@
+#To fix: 
+# Somewhere in the code, d1 is transformed to a character instead of a dataframe. 
+# Make sure the rename function works and that the use of it feels logical. 
+# Check why a lot of columns are transformed with this artimic operation (2 - var). Tur ning binary form (1,2) to (-1, 0)? 
+# Is there a better alternative for handling tranformation of binary variables, that is more clear?
+# Make sure the logic is separated for renaming variables, and applying artimic operations to them. 
+# Make sure the different groups of of HAD items are categorized based on their weight. 
+# See how to handla positive and negative items of HAD scale (signs of wellbeing or distress)
+# Perhaps use external operation for HAD score calculation HAD_scoring or alike 
 
 # =============================================================================
 # PainSensPROM Baseline — Data Management
@@ -446,15 +455,36 @@ minus_func <- function(data, prefix) {
 }
 
 rename_columns <- function(df, ...) {
+  if (!is.data.frame(df)) {
+    stop("First argument must be a data frame")
+  }
+  
   pairs <- list(...)
-  for (p in pairs) {
-    old_name <- p[[1]] # Second argument is old column name
-    new_name <- p[[2]] # Third argument is new column name
-    if (old_name %in% colnames(df)) {
-      colnames(df)[colnames(df) == old_name] <- new_name
+  new_names <- character()
+  
+  for (pair in pairs) {
+    if (length(pair) != 2) {
+      stop("All rename pairs must have exactly 2 elements")
+    }
+    
+    old_name <- pair[1]
+    new_name <- pair[2]
+    
+    if (old_name %in% names(df)) {
+      names(df)[names(df) == old_name] <- new_name
+      new_names <- c(new_names, new_name)
+    } else {
+      warning(sprintf("Column '%s' not found", old_name))
     }
   }
-  df
+  
+  # Update df i parent environment
+  parent_frame <- parent.frame()
+  df_name <- deparse(substitute(df))
+  assign(df_name, df, envir = parent_frame)
+  
+  # Return a character vector with new names
+  return(new_names)
 }
 
 sum_func <- function(data, prefix, new_name) {
@@ -764,103 +794,112 @@ d1$postcovid     <- 2 - d1$VAR24_8
 # Turn dummies to 0, 1, 2, 3 
 # For all rows in dataset, run function scoring_hads
 
-
-turn_pos_neg <- function(df = d1, var) {
-  minus_two_times_three_3 <- *(2- df$var)
-  return(minus_two_times_three_3)
+# Weight 3
+weight3_func <- function(x) {
+  3 * (2 - x)
 }
 
-# Strongest agreement, agree 3 on scale 0 to 3 
-# Rename 
-had_weight3 <- rename_columns( 
-  c("VAR25_1", "HAD_A1a"), # a) Jag känner mig spänd och nervös - Mestadels"
-  c("VAR26_1", "HAD_D1a"), # b) Jag uppskattar fortfarande saker jag tidigare uppskattat - Definitivt lika mycket 
-  c("VAR27_1", "HAD_A2a"), # c) Jag har en känsla av att något hemskt kommer att hända - Mycket klart och obehagligt 
-  c("VAR28_1", "HAD_D2a"), # d) Lika ofta som tidigare
-  c("VAR29_1", "HAD_A3a"), # e) Jag bekymrar mig över saker - Mestadels
-  c("VAR30_1", "HAD_D3a"), # f) Jag känner mig på gott humör - Mestadels
-  c("VAR31_1", "HAD_A4a"), # g) Jag kan sitta stilla och känna mig avslappnad - Absolut
-  c("VAR32_1", "HAD_D4a"), # h) Allting känns tungt - Nästan alltid 
-  c("VAR33_1", "HAD_A5a"), # i) Jag känner mig orolig, som om jag hade fjärilar i magen - Väldigt ofta
-  c("VAR34_1", "HAD_D5a"), # j) Jag har tappat intresset för hur jag ser ut - Fullständigt
-  c("VAR35_1", "HAD_A6a"), # k) Jag känner mig rastlös - Väldigt ofta
-  c("VAR36_1", "HAD_D6a"), # l) Jag ser med glädje fram emot saker och ting - Lika mycket som tidigare
-  c("VAR37_1", "HAD_A7a"), # m) Jag får plötsliga panikkänslor - Väldigt ofta 
-  c("VAR38_1", "HAD_D7a") # n) Jag kan uppskatta en god bok, ett TV- eller radioprogram - Ofta 
+# Weight 2
+weight2_func <- function(x) {
+  2 * (2 - x)
+}
+
+# Weight 1
+weight1_func <- function(x) {
+  1 * (2 - x)
+}
+
+# Weight 3
+weight0_func <- function(x) {
+  0 * (2 - x)
+}
+
+# Strongest agreement, degree 3 on scale 0 to 3 
+# Rename HAD with strongest agreement (will get weight 3)
+# N = negative, bad for mental health. 
+# P = positive, good for mental health
+had_weight3 <- rename_columns(d1,  
+  c("VAR25_1", "HAD_A1a"), # a) N Jag känner mig spänd och nervös - Mestadels"
+  c("VAR26_1", "HAD_D1a"), # b) P Jag uppskattar fortfarande saker jag tidigare uppskattat - Definitivt lika mycket 
+  c("VAR27_1", "HAD_A2a"), # c) N Jag har en känsla av att något hemskt kommer att hända - Mycket klart och obehagligt 
+  c("VAR28_1", "HAD_D2a"), # d) P Jag kan skratta och se det roliga i saker och ting - Lika ofta som tidigare
+  c("VAR29_1", "HAD_A3a"), # e) N Jag bekymrar mig över saker - Mestadels
+  c("VAR30_1", "HAD_D3a"), # f) P Jag känner mig på gott humör - Mestadels
+  c("VAR31_1", "HAD_A4a"), # g) P Jag kan sitta stilla och känna mig avslappnad - Absolut
+  c("VAR32_1", "HAD_D4a"), # h) N Allting känns tungt - Nästan alltid 
+  c("VAR33_1", "HAD_A5a"), # i) N Jag känner mig orolig, som om jag hade fjärilar i magen - Väldigt ofta
+  c("VAR34_1", "HAD_D5a"), # j) N Jag har tappat intresset för hur jag ser ut - Fullständigt
+  c("VAR35_1", "HAD_A6a"), # k) N Jag känner mig rastlös - Väldigt ofta
+  c("VAR36_1", "HAD_D6a"), # l) P Jag ser med glädje fram emot saker och ting - Lika mycket som tidigare
+  c("VAR37_1", "HAD_A7a"), # m) N Jag får plötsliga panikkänslor - Väldigt ofta 
+  c("VAR38_1", "HAD_D7a")  # n) P Jag kan uppskatta en god bok, ett TV- eller radioprogram - Ofta 
               )
-# Weight 
-weight3_had <- 3*(2-had_weight3)
 
+d1 <- d1 %>% 
+  mutate(across(all_of(had_weight3), weight3_func))
 
-my_data$HAD_A1a <- 3*(2-my_data$VAR25_1) # a) Jag känner mig spänd och nervös - Mestadels
-my_data$HAD_A1b <- 2*(2-my_data$VAR25_2) # a) Jag känner mig spänd och nervös - Ofta
-my_data$HAD_A1c <- 1*(2-my_data$VAR25_3) # a) Jag känner mig spänd och nervös - Av och till 
-my_data$HAD_A1d <- 0*(2-my_data$VAR25_4) # a) Jag känner mig spänd och nervös - Inte alls 
+# Second strongest agreement, degree 2 on scale 0 to 3 
+# Rename HAD with strongest agreement (will get weight 2)
+had_weight2 <- rename_columns( 
+  c("VAR25_2", "HAD_A1b"), # a) Jag känner mig spänd och nervös - Ofta
+  c("VAR26_2", "HAD_D1b"), # b) Jag uppskattar fortfarande saker jag tidigare uppskattat - Inte lika mycket
+  c("VAR27_2", "HAD_A2b"), # c) Jag har en känsla av att något hemskt kommer att hända - Inte så starkt nu
+  c("VAR28_2", "HAD_D2b"), # d) Jag kan skratta och se det roliga i saker och ting - Inte like ofta nu
+  c("VAR29_2", "HAD_A3b"), # e) Jag bekymrar mig över saker - Ganska ofta
+  c("VAR30_2", "HAD_D3b"), # f) Jag känner mig på gott humör - Ibland
+  c("VAR31_2", "HAD_A4b"), # g) Jag kan sitta stilla och känna mig avslappnad - Vanligtvis
+  c("VAR32_2", "HAD_D4b"), # h) Allting känns tungt - Ofta
+  c("VAR33_2", "HAD_A5b"), # i) Jag känner mig orolig, som om jag hade fjärilar i magen - Ganska ofta
+  c("VAR34_2", "HAD_D5b"), # j) Jag har tappat intresset för hur jag ser ut - Till stor del 
+  c("VAR35_2", "HAD_A6b"), # k) Jag känner mig rastlös - Ganska ofta
+  c("VAR36_2", "HAD_D6b"), # l) Jag ser med glädje fram emot saker och ting - Mindre än tidigare
+  c("VAR37_2", "HAD_A7b"), # m) Jag får plötsliga panikkänslor - Ganska ofta
+  c("VAR38_2", "HAD_D7b")  # n) Jag kan uppskatta en god bok, ett TV- eller radioprogram - Ibland
+)
+# Weight 2 
+weight2_had <- 2*(2-had_weight2)
 
-my_data$HAD_D1a <- 3*(2-my_data$VAR26_1) # b 
-my_data$HAD_D1b <- 2*(2-my_data$VAR26_2)
-my_data$HAD_D1c <- 1*(2-my_data$VAR26_3)
-my_data$HAD_D1d <- 0*(2-my_data$VAR26_4)
+# Third strongest agreement, degree 1 on scale 0 to 3 
+# Rename HAD with strongest agreement (will get weight 1)
+had_weight1 <- rename_columns( 
+  c("VAR25_3", "HAD_A1c"), # a) Jag känner mig spänd och nervös - Av och till
+  c("VAR26_3", "HAD_D1c"), # b) Jag uppskattar fortfarande saker jag tidigare uppskattat - Endast delvis
+  c("VAR27_3", "HAD_A2c"), # c) Jag har en känsla av att något hemskt kommer att hända - Betydligt svagare nu
+  c("VAR28_3", "HAD_D2c"), # d) Jag kan skratta och se det roliga i saker och ting - Betydligt mer sällan nu
+  c("VAR29_3", "HAD_A3c"), # e) Jag bekymrar mig över saker - Av och till
+  c("VAR30_3", "HAD_D3c"), # f) Jag känner mig på gott humör - Sällan
+  c("VAR31_3", "HAD_A4c"), # g) Jag kan sitta stilla och känna mig avslappnad - Sällan
+  c("VAR32_3", "HAD_D4c"), # h) Allting känns tungt - Ibland
+  c("VAR33_3", "HAD_A5c"), # i) Jag känner mig orolig, som om jag hade fjärilar i magen - Ibland
+  c("VAR34_3", "HAD_D5c"), # j) Jag har tappat intresset för hur jag ser ut - Delvis
+  c("VAR35_3", "HAD_A6c"), # k) Jag känner mig rastlös - Sällan
+  c("VAR36_3", "HAD_D6c"), # l) Jag ser med glädje fram emot saker och ting - Mycket mindre än tidigare
+  c("VAR37_3", "HAD_A7c"), # m) Jag får plötsliga panikkänslor - Sällan
+  c("VAR38_3", "HAD_D7c")  # n) Jag kan uppskatta en god bok, ett TV- eller radioprogram - Sällan
+)
+# Weight 1
+weight1_had <- 1*(2-had_weight1)
 
-my_data$HAD_A2a <- 3*(2-my_data$VAR27_1) # c
-my_data$HAD_A2b <- 2*(2-my_data$VAR27_2)
-my_data$HAD_A2c <- 1*(2-my_data$VAR27_3)
-my_data$HAD_A2d <- 0*(2-my_data$VAR27_4)
-
-#my_data$HAD_D2a <- 3*(2-my_data$VAR28_1) # d 
-my_data$HAD_D2b <- 2*(2-my_data$VAR28_2)
-my_data$HAD_D2c <- 1*(2-my_data$VAR28_3)
-my_data$HAD_D2d <- 0*(2-my_data$VAR28_4)
-
-#my_data$HAD_A3a <- 3*(2-my_data$VAR29_1)
-my_data$HAD_A3b <- 2*(2-my_data$VAR29_2)
-my_data$HAD_A3c <- 1*(2-my_data$VAR29_3)
-my_data$HAD_A3d <- 0*(2-my_data$VAR29_4)
-
-#my_data$HAD_D3a <- 3*(2-my_data$VAR30_1)
-my_data$HAD_D3b <- 2*(2-my_data$VAR30_2)
-my_data$HAD_D3c <- 1*(2-my_data$VAR30_3)
-my_data$HAD_D3d <- 0*(2-my_data$VAR30_4)
-
-#my_data$HAD_A4a <- 3*(2-my_data$VAR31_1)
-my_data$HAD_A4b <- 2*(2-my_data$VAR31_2)
-my_data$HAD_A4c <- 1*(2-my_data$VAR31_3)
-my_data$HAD_A4d <- 0*(2-my_data$VAR31_4)
-
-#my_data$HAD_D4a <- 3*(2-my_data$VAR32_1)
-my_data$HAD_D4b <- 2*(2-my_data$VAR32_2)
-my_data$HAD_D4c <- 1*(2-my_data$VAR32_3)
-my_data$HAD_D4d <- 0*(2-my_data$VAR32_4)
-
-#my_data$HAD_A5a <- 3*(2-my_data$VAR33_1)
-my_data$HAD_A5b <- 2*(2-my_data$VAR33_2)
-my_data$HAD_A5c <- 1*(2-my_data$VAR33_3)
-my_data$HAD_A5d <- 0*(2-my_data$VAR33_4)
-
-#my_data$HAD_D5a <- 3*(2-my_data$VAR34_1)
-my_data$HAD_D5b <- 2*(2-my_data$VAR34_2)
-my_data$HAD_D5c <- 1*(2-my_data$VAR34_3)
-my_data$HAD_D5d <- 0*(2-my_data$VAR34_4)
-
-#my_data$HAD_A6a <- 3*(2-my_data$VAR35_1)
-my_data$HAD_A6b <- 2*(2-my_data$VAR35_2)
-my_data$HAD_A6c <- 1*(2-my_data$VAR35_3)
-my_data$HAD_A6d <- 0*(2-my_data$VAR35_4)
-
-#my_data$HAD_D6a <- 3*(2-my_data$VAR36_1)
-my_data$HAD_D6b <- 2*(2-my_data$VAR36_2)
-my_data$HAD_D6c <- 1*(2-my_data$VAR36_3)
-my_data$HAD_D6d <- 0*(2-my_data$VAR36_4)
-
-#my_data$HAD_A7a <- 3*(2-my_data$VAR37_1)
-my_data$HAD_A7b <- 2*(2-my_data$VAR37_2)
-my_data$HAD_A7c <- 1*(2-my_data$VAR37_3)
-my_data$HAD_A7d <- 0*(2-my_data$VAR37_4)
-
-#my_data$HAD_D7a <- 3*(2-my_data$VAR38_1)
-my_data$HAD_D7b <- 2*(2-my_data$VAR38_2)
-my_data$HAD_D7c <- 1*(2-my_data$VAR38_3)
-my_data$HAD_D7d <- 0*(2-my_data$VAR38_4)
+# Fourth strongest agreement (disagree totally), degree 0 on scale 0 to 3 
+# Rename HAD with strongest agreement (will get weight 1)
+had_weight0 <- rename_columns( 
+  c("VAR25_4", "HAD_A1d"), # a) Jag känner mig spänd och nervös - Inte alls
+  c("VAR26_4", "HAD_D1d"), # b) Jag uppskattar fortfarande saker jag tidigare uppskattat - Nästan inte alls
+  c("VAR27_4", "HAD_A2d"), # c) Jag har en känsla av att något hemskt kommer att hända - Aldrig
+  c("VAR28_4", "HAD_D2d"), # d) Jag kan skratta och se det roliga i saker och ting - Aldrig
+  c("VAR29_4", "HAD_A3d"), # e) Jag bekymrar mig över saker - Någon enstaka gång
+  c("VAR30_4", "HAD_D3d"), # f) Jag känner mig på gott humör - Aldrig
+  c("VAR31_4", "HAD_A4d"), # g) Jag kan sitta stilla och känna mig avslappnad - Aldrig
+  c("VAR32_4", "HAD_D4d"), # h) Allting känns tungt - Aldrig
+  c("VAR33_4", "HAD_A5d"), # i) Jag känner mig orolig, som om jag hade fjärilar i magen - Aldrig
+  c("VAR34_4", "HAD_D5d"), # j) Jag har tappat intresset för hur jag ser ut - Inte alls
+  c("VAR35_4", "HAD_A6d"), # k) Jag känner mig rastlös - Inte alls
+  c("VAR36_4", "HAD_D6d"), # l) Jag ser med glädje fram emot saker och ting - Knappast alls
+  c("VAR37_4", "HAD_A7d"), # m) Jag får plötsliga panikkänslor - Aldrig
+  c("VAR38_4", "HAD_D7d")  # n) Jag kan uppskatta en god bok, ett TV- eller radioprogram - Mycket sällan
+)
+# Weight 0
+weight0_had <- 1*(2-had_weight0)
 
 # had_a: anxiety subscale, 0-21
 d1$had_a <-
