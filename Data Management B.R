@@ -437,36 +437,6 @@ verify_exclusive_data <- function(d1, exclusive_bases) {
 # dummy columns (1 = Ja, 2 = Nej). The pipeline removes/recodes those columns.
 # =============================================================================
 
-# == Help functions for variable cleaning =====================================
-minus_func <- function(data, prefix) {
-  data %>%
-    mutate(
-      across(starts_with(prefix), ~ .x - 1)
-    )
-}
-
-rename_columns <- function(df, ...) {
-  pairs <- list(...)
-  for (p in pairs) {
-    old_name <- p[[1]] # Second argument is old column name
-    new_name <- p[[2]] # Third argument is new column name
-    if (old_name %in% colnames(df)) {
-      colnames(df)[colnames(df) == old_name] <- new_name
-    }
-  }
-  df
-}
-
-sum_func <- function(data, prefix, new_name) {
-  data %>%
-    mutate(
-      "{new_name}" := rowSums(
-        across(starts_with(prefix)),
-        na.rm = TRUE
-      )
-    )
-}
-
 # == 1. Data adjustments =====================================================
 # Row-level corrections identified during data quality checks.
 
@@ -719,26 +689,23 @@ d1$psq17 <- (d1$VAR21_1 + d1$VAR21_2 + d1$VAR21_3 + d1$VAR21_4 +
   d1$VAR21_15 + d1$VAR21_16 + d1$VAR21_17) / 17
 
 # CSI: Central Sensitization Inventory part A (0-100, 25 items scored 0-4)
-
-d1 <- d1 %>%
-  minus_func("VAR22_") %>%
-  sum_func("VAR22_", "csi")
+d1$csi <- (d1$VAR22_1 + d1$VAR22_2 + d1$VAR22_3 + d1$VAR22_4 + d1$VAR22_5 +
+  d1$VAR22_6 + d1$VAR22_7 + d1$VAR22_8 + d1$VAR22_9 + d1$VAR22_10 +
+  d1$VAR22_11 + d1$VAR22_12 + d1$VAR22_13 + d1$VAR22_14 + d1$VAR22_15 +
+  d1$VAR22_16 + d1$VAR22_17 + d1$VAR22_18 + d1$VAR22_19 + d1$VAR22_20 +
+  d1$VAR22_21 + d1$VAR22_22 + d1$VAR22_23 + d1$VAR22_24 + d1$VAR22_25) - 25
 
 # CSI part B diagnoses (VAR23, matrix: 1=No -> 0, 2=Yes -> 1)
-d1 <- d1 %>%
-  minus_func("VAR23_") %>%
-  rename_columns(
-    c("VAR23_1", "restlesslegs"),
-    c("VAR23_2", "chronic_fatigue"),
-    c("VAR23_3", "fibromyalgia"),
-    c("VAR23_4", "TMD"),
-    c("VAR23_5", "headache_migraine"),
-    c("VAR23_6", "ibs"),
-    c("VAR23_7", "chemical_sens"),
-    c("VAR23_8", "neckpain"),
-    c("VAR23_9", "anxiety"),
-    c("VAR23_10", "depression")
-  )
+d1$restlesslegs     <- d1$VAR23_1 - 1
+d1$chronic_fatigue  <- d1$VAR23_2 - 1
+d1$fibromyalgia     <- d1$VAR23_3 - 1
+d1$TMD              <- d1$VAR23_4 - 1
+d1$headache_migraine <- d1$VAR23_5 - 1
+d1$ibs              <- d1$VAR23_6 - 1
+d1$chemical_sens    <- d1$VAR23_7 - 1
+d1$neckpain         <- d1$VAR23_8 - 1
+d1$anxiety          <- d1$VAR23_9 - 1
+d1$depression       <- d1$VAR23_10 - 1
 
 # Physician diagnoses (VAR24, matrix: 1=Yes -> 1, 2=No -> 0)
 d1$RA_arthrosis  <- 2 - d1$VAR24_1
@@ -756,111 +723,6 @@ d1$postcovid     <- 2 - d1$VAR24_8
 # Each item has 4 options scored: a=3, b=2, c=1, d=0.
 # Formula per item: 3*(2-VAR_1) + 2*(2-VAR_2) + 1*(2-VAR_3)
 # (the 0*(2-VAR_4) term is omitted since it is always zero)
-
-# Turn HAD items right based on if contributing to 
-# anxiety and depression or opposite. 
-
-# Dummy is multiplied by the weight assigned the the answer (0 to 3)
-# Turn dummies to 0, 1, 2, 3 
-# For all rows in dataset, run function scoring_hads
-
-
-turn_pos_neg <- function(df = d1, var) {
-  minus_two_times_three_3 <- *(2- df$var)
-  return(minus_two_times_three_3)
-}
-
-# Strongest agreement, agree 3 on scale 0 to 3 
-# Rename 
-had_weight3 <- rename_columns( 
-  c("VAR25_1", "HAD_A1a"), # a) Jag känner mig spänd och nervös - Mestadels"
-  c("VAR26_1", "HAD_D1a"), # b) Jag uppskattar fortfarande saker jag tidigare uppskattat - Definitivt lika mycket 
-  c("VAR27_1", "HAD_A2a"), # c) Jag har en känsla av att något hemskt kommer att hända - Mycket klart och obehagligt 
-  c("VAR28_1", "HAD_D2a"), # d) Lika ofta som tidigare
-  c("VAR29_1", "HAD_A3a"), # e) Jag bekymrar mig över saker - Mestadels
-  c("VAR30_1", "HAD_D3a"), # f) Jag känner mig på gott humör - Mestadels
-  c("VAR31_1", "HAD_A4a"), # g) Jag kan sitta stilla och känna mig avslappnad - Absolut
-  c("VAR32_1", "HAD_D4a"), # h) Allting känns tungt - Nästan alltid 
-  c("VAR33_1", "HAD_A5a"), # i) Jag känner mig orolig, som om jag hade fjärilar i magen - Väldigt ofta
-  c("VAR34_1", "HAD_D5a"), # j) Jag har tappat intresset för hur jag ser ut - Fullständigt
-  c("VAR35_1", "HAD_A6a"), # k) Jag känner mig rastlös - Väldigt ofta
-  c("VAR36_1", "HAD_D6a"), # l) Jag ser med glädje fram emot saker och ting - Lika mycket som tidigare
-  c("VAR37_1", "HAD_A7a"), # m) Jag får plötsliga panikkänslor - Väldigt ofta 
-  c("VAR38_1", "HAD_D7a") # n) Jag kan uppskatta en god bok, ett TV- eller radioprogram - Ofta 
-              )
-# Weight 
-weight3_had <- 3*(2-had_weight3)
-
-
-my_data$HAD_A1a <- 3*(2-my_data$VAR25_1) # a) Jag känner mig spänd och nervös - Mestadels
-my_data$HAD_A1b <- 2*(2-my_data$VAR25_2) # a) Jag känner mig spänd och nervös - Ofta
-my_data$HAD_A1c <- 1*(2-my_data$VAR25_3) # a) Jag känner mig spänd och nervös - Av och till 
-my_data$HAD_A1d <- 0*(2-my_data$VAR25_4) # a) Jag känner mig spänd och nervös - Inte alls 
-
-my_data$HAD_D1a <- 3*(2-my_data$VAR26_1) # b 
-my_data$HAD_D1b <- 2*(2-my_data$VAR26_2)
-my_data$HAD_D1c <- 1*(2-my_data$VAR26_3)
-my_data$HAD_D1d <- 0*(2-my_data$VAR26_4)
-
-my_data$HAD_A2a <- 3*(2-my_data$VAR27_1) # c
-my_data$HAD_A2b <- 2*(2-my_data$VAR27_2)
-my_data$HAD_A2c <- 1*(2-my_data$VAR27_3)
-my_data$HAD_A2d <- 0*(2-my_data$VAR27_4)
-
-#my_data$HAD_D2a <- 3*(2-my_data$VAR28_1) # d 
-my_data$HAD_D2b <- 2*(2-my_data$VAR28_2)
-my_data$HAD_D2c <- 1*(2-my_data$VAR28_3)
-my_data$HAD_D2d <- 0*(2-my_data$VAR28_4)
-
-#my_data$HAD_A3a <- 3*(2-my_data$VAR29_1)
-my_data$HAD_A3b <- 2*(2-my_data$VAR29_2)
-my_data$HAD_A3c <- 1*(2-my_data$VAR29_3)
-my_data$HAD_A3d <- 0*(2-my_data$VAR29_4)
-
-#my_data$HAD_D3a <- 3*(2-my_data$VAR30_1)
-my_data$HAD_D3b <- 2*(2-my_data$VAR30_2)
-my_data$HAD_D3c <- 1*(2-my_data$VAR30_3)
-my_data$HAD_D3d <- 0*(2-my_data$VAR30_4)
-
-#my_data$HAD_A4a <- 3*(2-my_data$VAR31_1)
-my_data$HAD_A4b <- 2*(2-my_data$VAR31_2)
-my_data$HAD_A4c <- 1*(2-my_data$VAR31_3)
-my_data$HAD_A4d <- 0*(2-my_data$VAR31_4)
-
-#my_data$HAD_D4a <- 3*(2-my_data$VAR32_1)
-my_data$HAD_D4b <- 2*(2-my_data$VAR32_2)
-my_data$HAD_D4c <- 1*(2-my_data$VAR32_3)
-my_data$HAD_D4d <- 0*(2-my_data$VAR32_4)
-
-#my_data$HAD_A5a <- 3*(2-my_data$VAR33_1)
-my_data$HAD_A5b <- 2*(2-my_data$VAR33_2)
-my_data$HAD_A5c <- 1*(2-my_data$VAR33_3)
-my_data$HAD_A5d <- 0*(2-my_data$VAR33_4)
-
-#my_data$HAD_D5a <- 3*(2-my_data$VAR34_1)
-my_data$HAD_D5b <- 2*(2-my_data$VAR34_2)
-my_data$HAD_D5c <- 1*(2-my_data$VAR34_3)
-my_data$HAD_D5d <- 0*(2-my_data$VAR34_4)
-
-#my_data$HAD_A6a <- 3*(2-my_data$VAR35_1)
-my_data$HAD_A6b <- 2*(2-my_data$VAR35_2)
-my_data$HAD_A6c <- 1*(2-my_data$VAR35_3)
-my_data$HAD_A6d <- 0*(2-my_data$VAR35_4)
-
-#my_data$HAD_D6a <- 3*(2-my_data$VAR36_1)
-my_data$HAD_D6b <- 2*(2-my_data$VAR36_2)
-my_data$HAD_D6c <- 1*(2-my_data$VAR36_3)
-my_data$HAD_D6d <- 0*(2-my_data$VAR36_4)
-
-#my_data$HAD_A7a <- 3*(2-my_data$VAR37_1)
-my_data$HAD_A7b <- 2*(2-my_data$VAR37_2)
-my_data$HAD_A7c <- 1*(2-my_data$VAR37_3)
-my_data$HAD_A7d <- 0*(2-my_data$VAR37_4)
-
-#my_data$HAD_D7a <- 3*(2-my_data$VAR38_1)
-my_data$HAD_D7b <- 2*(2-my_data$VAR38_2)
-my_data$HAD_D7c <- 1*(2-my_data$VAR38_3)
-my_data$HAD_D7d <- 0*(2-my_data$VAR38_4)
 
 # had_a: anxiety subscale, 0-21
 d1$had_a <-
@@ -970,7 +832,7 @@ verify_exclusive_data(d1, exclusive_bases)
 # group_info             — summary of all groups and their classification
 # d1                     — the transformed dataset
 
-View(codebook_exclusive)
-View(codebook_non_exclusive)
-View(group_info)
-View(d1)
+# View(codebook_exclusive)
+# View(codebook_non_exclusive)
+# View(group_info)
+# View(d1)
