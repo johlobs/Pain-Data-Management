@@ -1,4 +1,6 @@
 *.zip
+*.tmp
+~$*
 data
 docs
 Gammal kod

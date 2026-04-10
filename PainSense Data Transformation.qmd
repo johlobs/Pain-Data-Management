@@ -1,5 +1,5 @@
 ---
-title: "PainSense Datatransformation"
+title: "PainSense Data Transformation"
 author: "Kevin Matnok Hansen and Lovisa Johansson"
 format: docx
 editor: visual
