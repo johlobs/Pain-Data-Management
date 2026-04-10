@@ -1,5 +1,5 @@
 ---
-title: "PainSense – Datatransformation"
+title: "PainSense Datatransformation"
 author: "Kevin Matnok Hansen and Lovisa Johansson"
 format: docx
 editor: visual
@@ -29,6 +29,7 @@ library(tidyverse)
 library(readxl)
 library(rlang)
 library(labelled)
+library(openxlsx)
 ```
 
 The Excel file has two sheets: **VariableView** (codebook with variable names, labels, types, and value codes) and **Data** (one row per respondent).
@@ -544,19 +545,19 @@ The HADS contains both negative items (agreeing most indicated the individual is
 | VAR | Item | Subscale | Type | \_1 option | \_1 weight |
 |------------|------------|------------|------------|------------|------------|
 | VAR25 | Jag känner mig spänd och nervös | Anxiety | Negative | Mestadels | 3 |
-| VAR26 | Jag uppskattar fortfarande saker... | Depression | **Positive** | Definitivt lika mycket | **0** |
+| VAR26 | Jag uppskattar fortfarande saker... | Depression | Positive | Definitivt lika mycket | 0 |
 | VAR27 | Jag har en känsla av att något hemskt... | Anxiety | Negative | Mycket klart och obehagligt | 3 |
-| VAR28 | Jag kan skratta och se det roliga... | Depression | **Positive** | Lika ofta som tidigare | **0** |
+| VAR28 | Jag kan skratta och se det roliga... | Depression | Positive | Lika ofta som tidigare | 0 |
 | VAR29 | Jag bekymrar mig över saker | Anxiety | Negative | Mestadels | 3 |
-| VAR30 | Jag känner mig på gott humör | Depression | **Positive** | Mestadels | **0** |
-| VAR31 | Jag kan sitta stilla och känna mig avslappnad | Anxiety | **Positive** | Absolut | **0** |
+| VAR30 | Jag känner mig på gott humör | Depression | Positive | Mestadels | 0 |
+| VAR31 | Jag kan sitta stilla och känna mig avslappnad | Anxiety | Positive | Absolut | 0 |
 | VAR32 | Allting känns trögt | Depression | Negative | Nästan alltid | 3 |
 | VAR33 | Jag känner mig orolig, som om jag hade fjärilar... | Anxiety | Negative | Väldigt ofta | 3 |
 | VAR34 | Jag har tappat intresset för hur jag ser ut | Depression | Negative | Fullständigt | 3 |
 | VAR35 | Jag känner mig rastlös | Anxiety | Negative | Väldigt ofta | 3 |
-| VAR36 | Jag ser med glädje fram emot saker och ting | Depression | **Positive** | Lika mycket som tidigare | **0** |
+| VAR36 | Jag ser med glädje fram emot saker och ting | Depression | Positive | Lika mycket som tidigare | 0 |
 | VAR37 | Jag får plötsliga panikkänslor | Anxiety | Negative | Väldigt ofta | 3 |
-| VAR38 | Jag kan uppskatta en god bok, ett TV-program... | Depression | **Positive** | Ofta | **0** |
+| VAR38 | Jag kan uppskatta en god bok, ett TV-program... | Depression | Positive | Ofta | 0 |
 
 ```{r}
 # N-items: _1 = most distress → weight 3
@@ -781,12 +782,21 @@ for (b in exclusive_bases) {
 
 ## Chapter 9: Export
 
+The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with two sheets: **Data** (one row per respondent) and **Codebook** (variable labels and response options). The `docs/` folder is excluded from version control since it may contain personal data.
+
 ```{r}
-# library(openxlsx)
-# wb <- createWorkbook()
-# addWorksheet(wb, "Variable List")
-# writeData(wb, "Variable List", codebook_exclusive)
-# addWorksheet(wb, "Data")
-# writeData(wb, "Data", final)
-# saveWorkbook(wb, "PainSense_processed_data.xlsx", overwrite = TRUE)
+dir.create("docs", showWarnings = FALSE)
+
+wb <- createWorkbook()
+
+addWorksheet(wb, "Data")
+writeData(wb, "Data", final)
+
+addWorksheet(wb, "Codebook")
+writeData(wb, "Codebook", codebook_exclusive)
+
+saveWorkbook(wb, "docs/PainSense_processed_data.xlsx", overwrite = TRUE)
+
+cat(sprintf("Exported %d rows and %d variables to docs/PainSense_processed_data.xlsx\n",
+            nrow(final), ncol(final)))
 ```
