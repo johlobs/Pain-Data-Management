@@ -260,7 +260,7 @@ if (any(sex_missing, na.rm = TRUE)) {
 
 ## Chapter 5: Standardization of values
 
-Binary exclusive variables are raw-coded **1 = Ja, 2 = Nej**. These are recoded to **1 = yes, 0 = no**. Matrix variables on a **1–5** scale are shifted to **0–4**. Missing codes (999/998) are set to NA.
+Binary exclusive variables are raw-coded **1 = Ja, 2 = Nej**. These are recoded to **1 = yes, 0 = no**. Matrix variables on a **1–5** scale are shifted to **0–4**. Missing code (999) are set to NA.
 
 ```{r}
 recode_vars <- c(
@@ -398,84 +398,143 @@ processed$nr_sites <- ifelse(
 
 ### Widespread pain — ACR90
 
+The 1990 American College of Rheumatology (ACR) criteria classify pain as widespread when three conditions are simultaneously met: pain is present on both the left and right side of the body, pain is present both above and below the waist, and pain is present in the axial skeleton.
+
+**Body region groups**
+
+The 45 pain locations (VAR12) are grouped into five regions:
+
+| Region                | Description      |
+|-----------------------|------------------|
+| upper_right_acr90     | Right upper body |
+| upper_left_acr90      | Left upper body  |
+| lower_right_acr90     | Right lower body |
+| lower_left_acr90      | Left lower body  |
+| axial_acr90           | Axial skeleton   |
+
+**Classification**
+
+A respondent is classified as having widespread pain (ACR90 = 1) if pain is reported in the axial region (q5) and in at least one contralateral upper and lower body combination. The first valid pattern requires pain in the right upper body (q1) and the left lower body (q4). The second valid pattern requires pain in the left upper body (q2) and the right lower body (q3). Either pattern satisfies the requirement for pain on both sides of the body and both above and below the waist.
+
+ChronicP_ACR90 is set to 1 when a respondent meets both the ACR90 criterion and the chronic pain criterion.
+
 ```{r}
-processed$q1 <- rowSums(processed[, c("VAR12_5","VAR12_7","VAR12_9","VAR12_11",
-                                       "VAR12_26","VAR12_28","VAR12_30","VAR12_32")])
-processed$q2 <- rowSums(processed[, c("VAR12_4","VAR12_6","VAR12_8","VAR12_10",
-                                       "VAR12_27","VAR12_29","VAR12_31","VAR12_33")])
-processed$q3 <- rowSums(processed[, c("VAR12_18","VAR12_20","VAR12_22",
-                                       "VAR12_38","VAR12_40","VAR12_42","VAR12_44")])
-processed$q4 <- rowSums(processed[, c("VAR12_17","VAR12_19","VAR12_21",
-                                       "VAR12_39","VAR12_41","VAR12_43","VAR12_45")])
-processed$q5 <- rowSums(processed[, c("VAR12_3","VAR12_12","VAR12_13","VAR12_25",
-                                       "VAR12_34","VAR12_35","VAR12_36","VAR12_37")])
+processed$upper_right_acr90 <- rowSums(processed[, c("VAR12_5","VAR12_7","VAR12_9","VAR12_11",
+                                                      "VAR12_26","VAR12_28","VAR12_30","VAR12_32")])
+processed$upper_left_acr90  <- rowSums(processed[, c("VAR12_4","VAR12_6","VAR12_8","VAR12_10",
+                                                      "VAR12_27","VAR12_29","VAR12_31","VAR12_33")])
+processed$lower_right_acr90 <- rowSums(processed[, c("VAR12_18","VAR12_20","VAR12_22",
+                                                      "VAR12_38","VAR12_40","VAR12_42","VAR12_44")])
+processed$lower_left_acr90  <- rowSums(processed[, c("VAR12_17","VAR12_19","VAR12_21",
+                                                      "VAR12_39","VAR12_41","VAR12_43","VAR12_45")])
+processed$axial_acr90       <- rowSums(processed[, c("VAR12_3","VAR12_12","VAR12_13","VAR12_25",
+                                                      "VAR12_34","VAR12_35","VAR12_36","VAR12_37")])
 
-processed$contralat_1 <- ifelse(processed$q5 > 0 & processed$q4 > 0 & processed$q1 > 0, 1, 0)
-processed$contralat_2 <- ifelse(processed$q5 > 0 & processed$q3 > 0 & processed$q2 > 0, 1, 0)
+processed$contralat_1 <- ifelse(processed$axial_acr90 > 0 & processed$lower_left_acr90  > 0 & processed$upper_right_acr90 > 0, 1, 0)
+processed$contralat_2 <- ifelse(processed$axial_acr90 > 0 & processed$lower_right_acr90 > 0 & processed$upper_left_acr90  > 0, 1, 0)
 
-processed$ACR90         <- ifelse(processed$contralat_1 == 1 | processed$contralat_2 == 1, 1, 0)
+processed$ACR90          <- ifelse(processed$contralat_1 == 1 | processed$contralat_2 == 1, 1, 0)
 processed$ChronicP_ACR90 <- ifelse(processed$chronic_pain == 1 & processed$ACR90 == 1, 1, 0)
 ```
 
 ### Widespread pain — WP2019
 
-```{r}
-region1 <- ifelse(processed$VAR12_2==1|processed$VAR12_23==1|processed$VAR12_5==1|
-                  processed$VAR12_26==1|processed$VAR12_7==1|processed$VAR12_28==1|
-                  processed$VAR12_9==1|processed$VAR12_11==1|processed$VAR12_30==1|
-                  processed$VAR12_32==1, 1, 0)
-region2 <- ifelse(processed$VAR12_1==1|processed$VAR12_24==1|processed$VAR12_4==1|
-                  processed$VAR12_27==1|processed$VAR12_6==1|processed$VAR12_29==1|
-                  processed$VAR12_8==1|processed$VAR12_10==1|processed$VAR12_31==1|
-                  processed$VAR12_33==1, 1, 0)
-region3 <- ifelse(processed$VAR12_18==1|processed$VAR12_38==1|processed$VAR12_40==1|
-                  processed$VAR12_20==1|processed$VAR12_22==1|processed$VAR12_42==1|
-                  processed$VAR12_44==1, 1, 0)
-region4 <- ifelse(processed$VAR12_17==1|processed$VAR12_39==1|processed$VAR12_41==1|
-                  processed$VAR12_19==1|processed$VAR12_21==1|processed$VAR12_43==1|
-                  processed$VAR12_45==1, 1, 0)
-region5 <- ifelse(processed$VAR12_3==1|processed$VAR12_25==1|processed$VAR12_34==1|
-                  processed$VAR12_35==1|processed$VAR12_36==1|processed$VAR12_37==1|
-                  processed$VAR12_12==1|processed$VAR12_13==1|processed$VAR12_14==1|
-                  processed$VAR12_15==1, 1, 0)
-nr_regions <- region1 + region2 + region3 + region4 + region5
+Widespread pain according to the 2019 classification is determined by two complementary measures: the Widespread Pain Index (WPI) and the number of affected body regions.
 
-processed$WPI_AGE <-
-  ifelse(processed$VAR12_2==1|processed$VAR12_23==1,1,0) +
-  ifelse(processed$VAR12_5==1|processed$VAR12_26==1,1,0) +
-  ifelse(processed$VAR12_7==1|processed$VAR12_28==1,1,0) +
-  ifelse(processed$VAR12_9==1|processed$VAR12_11==1|
-         processed$VAR12_30==1|processed$VAR12_32==1,1,0) +
-  ifelse(processed$VAR12_1==1|processed$VAR12_24==1,1,0) +
-  ifelse(processed$VAR12_4==1|processed$VAR12_27==1,1,0) +
-  ifelse(processed$VAR12_6==1|processed$VAR12_29==1,1,0) +
-  ifelse(processed$VAR12_8==1|processed$VAR12_10==1|
-         processed$VAR12_31==1|processed$VAR12_33==1,1,0) +
-  ifelse(processed$VAR12_18==1|processed$VAR12_38==1,1,0) +
-  ifelse(processed$VAR12_18==1|processed$VAR12_40==1,1,0) +
-  ifelse(processed$VAR12_20==1|processed$VAR12_22==1|
-         processed$VAR12_42==1|processed$VAR12_44==1,1,0) +
-  ifelse(processed$VAR12_17==1|processed$VAR12_39==1,1,0) +
-  ifelse(processed$VAR12_17==1|processed$VAR12_41==1,1,0) +
-  ifelse(processed$VAR12_19==1|processed$VAR12_21==1|
-         processed$VAR12_43==1|processed$VAR12_45==1,1,0) +
-  ifelse(processed$VAR12_3==1|processed$VAR12_25==1,1,0) +
-  ifelse(processed$VAR12_34==1|processed$VAR12_35==1,1,0) +
-  ifelse(processed$VAR12_36==1|processed$VAR12_37==1,1,0) +
-  ifelse(processed$VAR12_12==1|processed$VAR12_13==1,1,0) +
-  ifelse(processed$VAR12_14==1|processed$VAR12_15==1,1,0)
+**Body regions**
+
+The 45 pain locations (VAR12) are assigned to five body regions. A region is considered affected if at least one location within it is marked.
+
+| Region                | Description      |
+|-----------------------|------------------|
+| upper_right_wp2019    | Right upper body |
+| upper_left_wp2019     | Left upper body  |
+| lower_right_wp2019    | Right lower body |
+| lower_left_wp2019     | Left lower body  |
+| axial_wp2019          | Axial skeleton   |
+
+**Widespread Pain Index (WPI_AGE)**
+
+The WPI counts 19 bilateral anatomical areas. Each area is scored as 1 if pain is reported on either or both sides, giving a maximum score of 19. Respondents who reported no pain in the past seven days are assigned a WPI of 0.
+
+**Classification**
+
+A respondent is classified as having widespread pain (WP2019_AGE = 1) if the WPI exceeds 6 and pain is present in more than 3 of the 5 body regions.
+
+CP_WP2019_AGE is set to 1 when a respondent meets both the WP2019 criterion and the chronic pain criterion.
+
+Pain3cat_CWSP2019 provides a three-category pain classification. A value of 0 indicates no chronic pain. A value of 1 indicates chronic non-widespread pain. A value of 2 indicates chronic widespread pain.
+
+The WPI is calculated using `calc_wpi()`, which takes a dataframe and scores each of the 19 bilateral areas as 1 if at least one location within that area is marked, and 0 otherwise. The total WPI is the sum across all 19 areas.
+
+```{r}
+calc_wpi <- function(df) {
+  areas <- list(
+    c("VAR12_2",  "VAR12_23"),
+    c("VAR12_5",  "VAR12_26"),
+    c("VAR12_7",  "VAR12_28"),
+    c("VAR12_9",  "VAR12_11", "VAR12_30", "VAR12_32"),
+    c("VAR12_1",  "VAR12_24"),
+    c("VAR12_4",  "VAR12_27"),
+    c("VAR12_6",  "VAR12_29"),
+    c("VAR12_8",  "VAR12_10", "VAR12_31", "VAR12_33"),
+    c("VAR12_18", "VAR12_38"),
+    c("VAR12_18", "VAR12_40"),
+    c("VAR12_20", "VAR12_22", "VAR12_42", "VAR12_44"),
+    c("VAR12_17", "VAR12_39"),
+    c("VAR12_17", "VAR12_41"),
+    c("VAR12_19", "VAR12_21", "VAR12_43", "VAR12_45"),
+    c("VAR12_3",  "VAR12_25"),
+    c("VAR12_34", "VAR12_35"),
+    c("VAR12_36", "VAR12_37"),
+    c("VAR12_12", "VAR12_13"),
+    c("VAR12_14", "VAR12_15")
+  )
+
+  scores <- sapply(areas, function(cols) {
+    as.integer(rowSums(df[, cols, drop = FALSE], na.rm = FALSE) > 0)
+  })
+
+  rowSums(scores)
+}
+```
+
+```{r}
+upper_right_wp2019 <- ifelse(processed$VAR12_2==1|processed$VAR12_23==1|processed$VAR12_5==1|
+                             processed$VAR12_26==1|processed$VAR12_7==1|processed$VAR12_28==1|
+                             processed$VAR12_9==1|processed$VAR12_11==1|processed$VAR12_30==1|
+                             processed$VAR12_32==1, 1, 0)
+upper_left_wp2019  <- ifelse(processed$VAR12_1==1|processed$VAR12_24==1|processed$VAR12_4==1|
+                             processed$VAR12_27==1|processed$VAR12_6==1|processed$VAR12_29==1|
+                             processed$VAR12_8==1|processed$VAR12_10==1|processed$VAR12_31==1|
+                             processed$VAR12_33==1, 1, 0)
+lower_right_wp2019 <- ifelse(processed$VAR12_18==1|processed$VAR12_38==1|processed$VAR12_40==1|
+                             processed$VAR12_20==1|processed$VAR12_22==1|processed$VAR12_42==1|
+                             processed$VAR12_44==1, 1, 0)
+lower_left_wp2019  <- ifelse(processed$VAR12_17==1|processed$VAR12_39==1|processed$VAR12_41==1|
+                             processed$VAR12_19==1|processed$VAR12_21==1|processed$VAR12_43==1|
+                             processed$VAR12_45==1, 1, 0)
+axial_wp2019       <- ifelse(processed$VAR12_3==1|processed$VAR12_25==1|processed$VAR12_34==1|
+                             processed$VAR12_35==1|processed$VAR12_36==1|processed$VAR12_37==1|
+                             processed$VAR12_12==1|processed$VAR12_13==1|processed$VAR12_14==1|
+                             processed$VAR12_15==1, 1, 0)
+nr_regions_wp2019 <- upper_right_wp2019 + upper_left_wp2019 + lower_right_wp2019 +
+                     lower_left_wp2019 + axial_wp2019
+
+processed$WPI_AGE <- calc_wpi(processed)
 
 processed$WPI_AGE <- ifelse(is.na(processed$pain7days), NA, processed$WPI_AGE)
 processed$WPI_AGE <- ifelse(is.na(processed$WPI_AGE) & processed$pain7days == 0, 0, processed$WPI_AGE)
 
-processed$WP2019_AGE    <- as.integer(processed$WPI_AGE > 6 & nr_regions > 3)
+processed$WP2019_AGE    <- as.integer(processed$WPI_AGE > 6 & nr_regions_wp2019 > 3)
 processed$CP_WP2019_AGE <- as.integer(processed$chronic_pain == 1 & processed$WP2019_AGE == 1)
 
 processed$Pain3cat_CWSP2019 <- ifelse(
   processed$chronic_pain == 1 & processed$CP_WP2019_AGE == 1, 2,
   ifelse(processed$chronic_pain == 1, 1, 0))
 
-rm(region1, region2, region3, region4, region5, nr_regions)
+rm(upper_right_wp2019, upper_left_wp2019, lower_right_wp2019,
+   lower_left_wp2019, axial_wp2019, nr_regions_wp2019)
 ```
 
 ### Treatments (VAR20)

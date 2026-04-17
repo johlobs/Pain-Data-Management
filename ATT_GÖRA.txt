@@ -1,0 +1,69 @@
+ATT GÖRA — PainSensPROM Baseline Data Management
+=================================================
+Senast uppdaterad: 2026-04-16
+
+
+KODFILER
+--------
+
+PainSense - Data Transformation.qmd
+  Den aktivt utvecklade huvudfilen (ersätter Data Management.R).
+  Quarto-dokument med hela pipeline:n i nio kapitel: initiering,
+  variabelklassificering, verifiering, datajusteringar, standardisering,
+  variabelberäkning, kollapsning av dummies, namnbyte/labels, export.
+  Kod av Kevin Matnok Hansen och Lovisa Johansson.
+
+Data Management.R / Data Management B.R
+  Äldre versioner av pipeline:n. Används nu som referens.
+
+Annas kod.R
+  Annas version av kod för projektet. Ligger i TRE.
+
+Create file new with random sheet.R
+  Hjälpskript för att generera testdata med korrekt struktur.
+
+
+ATT GÖRA
+--------
+
+ÖVERGRIPANDE BUGGAR
+-------------------
+
+BUG 3 — MINOR: VAR24 saknar beräknade namngivna variabler
+   VAD SOM HÄNDER:
+   I nuvarande .qmd-kod skapas inga namngivna variabler från VAR24
+   (sjukdomar/skador, Q18). Kolumnerna VAR24_1..n ligger kvar i
+   final-datasetet utan vidare bearbetning. (Jämför VAR23 som
+   omvandlas till csi_b_names-variabler i Kapitel 6.)
+
+   VAD SOM BEHÖVER GÖRAS:
+   Besluta om VAR24 ska processas likt VAR23 (skapa namngivna
+   variabler, ta bort råkolumner) eller lämnas som matris i slutdata.
+
+
+DESIGNBESLUT SOM BEHÖVER FATTAS
+--------------------------------
+
+6. Tydligare binärkodning
+   Rådata kodar Ja/Nej som 1/2. Nuvarande kod använder replace(.x, .x == 2, 0)
+   i Kapitel 5 (fungerar korrekt). Överväg att byta till
+   as.integer(var == 1) för tydligare intentionsuttryck.
+
+9. Ha ett separat skript för att hantera "konstiga värden" såsom
+personnummer som är skrivet på inkorrekt sätt.
+   (Kapitel 4 i .qmd innehåller nu rad-justeringar inline. Separat
+   skript är ännu inte skapat.)
+
+11. När vi jobbar i TRE-servern, se till att stänga R ordentligt,
+inte bara genom att trycka på kryss, utan kanske med command quit R.
+
+Nytt från 2026-04-16
+
+- Lovisa och Kevin har möte, orientera sig i datan, hur man öppnar koden genom R i valvet. 
+- ändra förklaring "Binary exclusive variables are raw-coded 1 = Ja, 2 = Nej. These are recoded to 1 = yes, 0 = no. Matrix variables on a 1–5 scale are shifted to 0–4. Missing codes (999/998) are set to NA." till 999. 
+- Kolla Annas kod, det som ligger under adjusted data, t.ex hårdkodade. Lägga till en förklarande text, men behöver inte ändra Annas kod. Den ligger bara i TRE. Ha som ett separat skript. 
+- Gör nytt skript, för en första datakoll (explorative variable analysis). 
+- Skapa frekvenstabell med socioekonomiska faktorer och för vissa andra variabler. Explorative analysis. Hitta missing och konstiga data. I koppling till frekvenstabellen sammanställa en analys till Anna om vad vi hittar för konstiga data och missing. Undersöka missing i den mån vi kan. 
+Frekvenser, medelvärden, median, variabler, missing. 
+- lägg till förklaring till avsnitten om widespead pain. 
+
