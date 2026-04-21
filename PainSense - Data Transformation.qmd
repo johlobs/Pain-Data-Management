@@ -177,7 +177,17 @@ codebook_non_exclusive <- label_table %>%
 
 ## Chapter 3: Verification
 
-Cross-checks the manual classification against VariableView metadata before any data is modified. Produces warnings (not errors) so the script still runs, but issues are printed to the console.
+This chapter cross-checks the manual classification from Chapter 2 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early — for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
+
+`verify_classification()` takes the `group_info` table built in Chapter 2 and runs five checks:
+
+1. **Unclassified variables** — any `VARnn` base that does not appear in `exclusive`, `non_exclusive`, or `matrix_groups`.
+2. **Exclusive classified as Matrix in VariableView** — the Type column in VariableView says "Matrix" but the variable is in the `exclusive` vector.
+3. **Exclusive with "Flera alternativ" in label** — the question label suggests multiple answers are allowed, which contradicts exclusive classification.
+4. **Matrix classified as Check Boxes in VariableView** — the Type column says "Check Boxes" (i.e. non-exclusive) but the variable is in `matrix_groups`.
+5. **Exclusive with more than 11 sub-items** — a single-select question rarely has more than 11 options; a high count may indicate a misclassification.
+
+Issues are printed to the console but do not stop the script, so all checks run regardless. The function returns the warning messages invisibly so they can be captured programmatically if needed.
 
 ```{r}
 verify_classification <- function(group_info) {
@@ -233,7 +243,13 @@ verify_classification(group_info)
 
 ## Chapter 4: Data adjustments
 
-Row-level corrections identified during data quality checks. These are applied to the raw data before any recoding.
+This chapter corrects known errors tied to specific respondents, identified through manual data review. Each correction is tied to a specific ID and a documented reason. This chapter changes with each new wave of data review — if a new error is found, a new line is added here.
+
+It does not handle general format or encoding uncertainties (such as ambiguous date formats); those are addressed defensively in Chapter 6 at the point where each variable is actually used.
+
+### Data entry errors
+
+Known errors identified during data quality review, corrected by respondent ID. Values are set to their intended values in the raw 1/2 coding used by Sunet Survey.
 
 ```{r}
 # VAR07: weight 995 kg → 95 kg (data entry error, ID 7)
@@ -241,18 +257,26 @@ processed$VAR07[processed$ID == 7] <- 95
 
 # VAR15_8: value 21 → 2 (Nej, data entry error, ID 2005)
 processed$VAR15_8[processed$ID == 2005] <- 2
+```
 
-# VAR04: missing legal sex imputed from personnummer.
-# Swedish personnummer: the second-to-last digit is odd for men, even for women.
-pnr        <- trimws(as.character(processed$VAR02))
-sex_digit  <- as.integer(substr(pnr, nchar(pnr) - 1, nchar(pnr) - 1))
-is_woman   <- sex_digit %% 2 == 0
+### Sex imputation from personnummer
+
+VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for men and even for women.
+
+`pnr` is stored as a vector here and reused in Chapter 6 to derive birth year — do not remove it.
+
+Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 5 recodes 2 → 0. Assigning 1 here means "this option was selected".
+
+```{r}
+pnr       <- trimws(as.character(processed$VAR02))
+sex_digit <- as.integer(substr(pnr, nchar(pnr) - 1, nchar(pnr) - 1))
+is_woman  <- sex_digit %% 2 == 0
 
 sex_missing <- (processed$VAR04_1 != 1 & processed$VAR04_2 != 1) |
                (is.na(processed$VAR04_1) & is.na(processed$VAR04_2))
 if (any(sex_missing, na.rm = TRUE)) {
-  processed$VAR04_1[sex_missing] <- ifelse(is_woman[sex_missing], 2, 1)
-  processed$VAR04_2[sex_missing] <- ifelse(is_woman[sex_missing], 1, 2)
+  processed$VAR04_1[sex_missing] <- if_else(is_woman[sex_missing], 2, 1)
+  processed$VAR04_2[sex_missing] <- if_else(is_woman[sex_missing], 1, 2)
 }
 ```
 
@@ -260,7 +284,16 @@ if (any(sex_missing, na.rm = TRUE)) {
 
 ## Chapter 5: Standardization of values
 
-Binary exclusive variables are raw-coded **1 = Ja, 2 = Nej**. These are recoded to **1 = yes, 0 = no**. Matrix variables on a **1–5** scale are shifted to **0–4**. Missing code (999) are set to NA.
+All variables are standardized before any derived variables are created in Chapter 6.
+
+Two transformations are applied depending on variable type:
+
+- **Recode** (`recode_vars`): binary exclusive variables are raw-coded **1 = Ja, 2 = Nej** by Sunet Survey. These are recoded to **1 = yes, 0 = no** so that 1 consistently means "selected".
+- **Shift** (`shift_vars`): matrix variables use a **1–5** scale in the raw data. These are shifted to **0–4** so that 0 means "not at all" rather than 1.
+
+In both cases, the missing code **999** is first replaced with NA.
+
+The prefixes in `recode_vars` and `shift_vars` include a trailing underscore (e.g. `"VAR11_"`) so that `starts_with()` matches `VAR11_1`, `VAR11_2` etc. but not `VAR110_1` or `VAR112_3`. Without the underscore, a prefix like `"VAR11"` would incorrectly match unrelated variables.
 
 ```{r}
 recode_vars <- c(
@@ -285,20 +318,25 @@ processed <- processed %>%
 
 ## Chapter 6: Formation of new variables
 
+This chapter derives all variables ready for analysis from the standardized data. Unlike Chapter 4, corrections here are not tied to specific respondents — they reflect general defensive handling of format and encoding uncertainties that could arise in any data export (e.g. ambiguous date formats, missing values that carry a substantive meaning).
+
 ### Age and birthyear
 
-Birthyear is extracted from "personnummer". Swedish personal number can be 10 or 12 digits. Assuming no one is born before 1915, impute "20XX" when numbers are smaller than 15. For 10-digit numbers, YY ≥ 15 → 19YY, else → 20YY.
+Birthyear is extracted from personnummer. Swedish personal numbers can be 10 or 12 digits. Assuming no one is born before 1915: for 10-digit numbers, YY ≥ 15 → 19YY, else → 20YY.
+
+`Svarstillfälle` (survey date) is parsed with `lubridate::parse_date_time()` to handle both `yyyy-mm-dd` and `dd-mm-yyyy` formats, which may differ between export tools and operating system locale settings.
 
 ```{r}
-resp_year <- as.integer(format(as.Date(processed$Svarstillfälle), "%Y"))
+resp_year <- as.integer(format(
+  lubridate::parse_date_time(processed$Svarstillfälle, orders = c("ymd", "dmy")),
+  "%Y"
+))
 
-processed$birthyear <- ifelse(
-  nchar(pnr) == 12,
-  as.integer(substr(pnr, 1, 4)),
-  {
-    yy <- as.integer(substr(pnr, 1, 2))
-    ifelse(yy >= 15L, 1900L + yy, 2000L + yy)
-  }
+yy <- as.integer(substr(pnr, 1, 2))
+processed$birthyear <- case_when(
+  nchar(pnr) == 12  ~ as.integer(substr(pnr, 1, 4)),
+  yy >= 15L         ~ 1900L + yy,
+  TRUE              ~ 2000L + yy
 )
 
 processed$age <- resp_year - processed$birthyear
@@ -393,16 +431,18 @@ processed$pain7days <- processed$VAR11_1  # 1 = yes, 0 = no
 
 #### Chronicity
 
-`pain_duration` converts the exclusive-coded VAR17 columns into a single numeric value using the `rowSums(...* 0:4)` pattern: each VAR17_k column is 1 for the selected option and 0 otherwise, so multiplying by the weight vector `0:4` and summing gives the ordinal score for the chosen category.
+`pain_duration` converts the exclusively coded VAR17 columns into a single numeric value using the `rowSums(...* 0:4)` pattern: each VAR17_k column is 1 for the selected option and 0 otherwise, so multiplying by the weight vector `0:4` and summing gives the ordinal score for the chosen category.
 
 `chronic_pain` is 1 if the respondent has current pain (`pain7days == 1`) and reports pain duration of at least 6 months (score ≥ 2). Respondents who did not answer VAR11 are set to NA rather than 0.
 
 ```{r}
 processed$pain_duration <- rowSums(processed[, paste0("VAR17_", 1:5)] * 0:4)
 
-processed$chronic_pain <- ifelse(
-  processed$pain7days == 1 & processed$pain_duration >= 2, 1, 0)
-processed$chronic_pain[is.na(processed$pain7days)] <- NA
+processed$chronic_pain <- case_when(
+  is.na(processed$pain7days)                                    ~ NA_real_,
+  processed$pain7days == 1 & processed$pain_duration >= 2      ~ 1,
+  TRUE                                                          ~ 0
+)
 ```
 
 #### Pain character
@@ -428,10 +468,10 @@ processed$nrs_move7d <- rowSums(processed[, paste0("VAR15_", 1:11)] * 0:10)
 ### Number of pain sites
 
 ```{r}
-processed$nr_sites <- ifelse(
+processed$nr_sites <- if_else(
   processed$pain7days == 1,
   rowSums(processed[, paste0("VAR12_", 1:45)], na.rm = FALSE),
-  NA
+  NA_real_
 )
 ```
 
@@ -642,7 +682,7 @@ The HADS consists of 14 items: 7 for anxiety (odd questions, VAR25–VAR37) and 
 
 **Scoring of positive vs. negative items**
 
-The HADS contains both negative items (agreeing most indicated the individual is much depressed or have much anxiety) where the most distressing response is the first option, and positive items (agreeing most is an indication of low degree of depression or anxiety) where the healthiest response is the first option. To ensure that all items contribute in the same direction (higher = more distress), positive items are reverse-scored.
+The HADS contains both negative items (agreeing most indicated the individual is much depressed or have much anxiety) where the most distressing response is the first option, and positive items (agreeing most is an indication of low degree of depression or anxiety) where the healthiest response is the first option. To ensure that all items contribute in the same direction (higher = more distress), positive items are reverse scored.
 
 *Sources:*
 
@@ -728,7 +768,7 @@ The ISI total score (range 0–28) is the sum of two subscales:
 - **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
 - **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
 
-`exclusive_score()` converts any exclusive-coded variable to a numeric score by multiplying each binary column by its ordinal weight (0, 1, 2, …) and summing — the same logic as `rowSums(...* 0:4)` used elsewhere, but named for readability.
+`exclusive_score()` converts any exclusively coded variable to a numeric score by multiplying each binary column by its ordinal weight (0, 1, 2, …) and summing — the same logic as `rowSums(...* 0:4)` used elsewhere, but named for readability.
 
 ```{r}
 exclusive_score <- function(df, var, n) {
@@ -761,7 +801,7 @@ Physical activity is captured in two separate dimensions — vigorous exercise (
 | `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = >300 min |
 | `PA_days` | Days per week with ≥30 min everyday activity | VAR48, Q30 | 0–7 days |
 
-All four variables are exclusive-coded and converted to ordinal scores using `rowSums * weights`.
+All four variables are exclusively coded and converted to ordinal scores using `rowSums * weights`.
 
 ```{r}
 processed$PE_time <- rowSums(processed[, paste0("VAR45_", 1:6)] * 0:5)
@@ -772,7 +812,7 @@ processed$PA_days <- rowSums(processed[, paste0("VAR48_", 1:8)] * 0:7)
 
 #### Smoking
 
-`smoke` captures current smoking status on a four-level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
+`smoke` captures current smoking status on a four level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
 
 | Variable | Question | Source | Scale |
 |---|---|---|---|
