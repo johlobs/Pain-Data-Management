@@ -47,7 +47,7 @@ processed <- read_excel(filepath, sheet = "Data")
 Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
 
 | Class | Description | Processing |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
 | **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
 | **matrix** | Independent sub-items with own scale | Left unchanged |
@@ -263,7 +263,7 @@ processed$VAR15_8[processed$ID == 2005] <- 2
 
 VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for men and even for women.
 
-`pnr` is stored as a vector here and reused in Chapter 6 to derive birth year — do not remove it.
+`pnr` is stored as a vector here and reused in Chapter 6 to derive birth year.
 
 Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 5 recodes 2 → 0. Assigning 1 here means "this option was selected".
 
@@ -415,12 +415,12 @@ This section derives core pain variables from the raw survey data. The variables
 **Derived variables overview**
 
 | Variable | Source | Scale | Interpretation |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | `pain7days` | VAR11_1 | 0/1 | 1 = pain in the past 7 days |
-| `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<3 months, …, 4 = \>10 years |
-| `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 6 months |
+| `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<1 month, …, 4 = ≥2 years |
+| `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 3 months |
 | `persistent` | VAR18_2 | 0/1 | 0 = periodic, 1 = persistent |
-| `pain_freq` | VAR16_1–5 | 1–5 | 1 = rarely, 5 = always |
+| `pain_freq` | VAR16_1–5 | 0–4 | 0 = seldom, 4 = every day |
 | `nrs_mean7d` | VAR13_1–11 | 0–10 | Mean pain intensity past 7 days (NRS) |
 | `nrs_rest7d` | VAR14_1–11 | 0–10 | Pain at rest past 7 days (NRS) |
 | `nrs_move7d` | VAR15_1–11 | 0–10 | Pain during movement past 7 days (NRS) |
@@ -435,9 +435,17 @@ processed$pain7days <- processed$VAR11_1  # 1 = yes, 0 = no
 
 #### Chronicity
 
-`pain_duration` converts the exclusively coded VAR17 columns into a single numeric value using the `rowSums(...* 0:4)` pattern: each VAR17_k column is 1 for the selected option and 0 otherwise, so multiplying by the weight vector `0:4` and summing gives the ordinal score for the chosen category.
+`pain_duration` converts the exclusively coded VAR17 columns into a 0–4 ordinal score using the `rowSums(...* 0:4)` pattern. VAR17_1 corresponds to the shortest duration category and VAR17_5 to the longest, so the ascending weight vector `0:4` preserves the natural ordering: higher scores indicate longer pain history.
 
-`chronic_pain` is 1 if the respondent has current pain (`pain7days == 1`) and reports pain duration of at least 6 months (score ≥ 2). Respondents who did not answer VAR11 are set to NA rather than 0.
+| Score | Raw column | Response option                 |
+|-------|------------|---------------------------------|
+| 0     | VAR17_1    | Less than 1 month               |
+| 1     | VAR17_2    | 1 month to less than 3 months   |
+| 2     | VAR17_3    | 3 months to less than 12 months |
+| 3     | VAR17_4    | 12 months to less than 2 years  |
+| 4     | VAR17_5    | 2 years or more                 |
+
+`chronic_pain` is 1 if the respondent has current pain (`pain7days == 1`) and reports pain duration of at least 3 months (score ≥ 2, i.e. VAR17_3 or higher). Respondents who did not answer VAR11 are set to NA rather than 0.
 
 ```{r}
 processed$pain_duration <- rowSums(processed[, paste0("VAR17_", 1:5)] * 0:4)
@@ -451,12 +459,20 @@ processed$chronic_pain <- case_when(
 
 #### Pain character
 
-`persistent` distinguishes periodic from persistent pain. `pain_freq` summarises how often the respondent experiences pain using the same `rowSums * weight` approach as `pain_duration`, here with weights 1–5.
+`persistent` distinguishes periodic from persistent pain. `pain_freq` summarises how often the respondent experiences pain on a 0–4 scale where higher values indicate higher frequency. VAR16 is reverse-coded in the raw data: VAR16_1 corresponds to the most frequent option ("every day") and VAR16_5 to the least frequent ("seldom"). Multiplying by the descending weight vector `4:0` reverses this so that the derived variable is intuitive: 4 = every day, 0 = seldom.
+
+| Score | Raw column | Response option                           |
+|-------|------------|-------------------------------------------|
+| 4     | VAR16_1    | Every day                                 |
+| 3     | VAR16_2    | A couple of days per week                 |
+| 2     | VAR16_3    | One day per week                          |
+| 1     | VAR16_4    | A couple of days per month                |
+| 0     | VAR16_5    | Seldom / not at all in the past 12 months |
 
 ```{r}
 processed$persistent <- processed$VAR18_2  # 0 = periodisk, 1 = ihållande
 
-processed$pain_freq <- rowSums(processed[, paste0("VAR16_", 1:5)] * 1:5)
+processed$pain_freq <- rowSums(processed[, paste0("VAR16_", 1:5)] * 4:0)
 ```
 
 #### Pain intensity (NRS)
@@ -539,7 +555,7 @@ The 45 pain locations (VAR12) are assigned to five body regions. A region is con
 **Derived variables overview**
 
 | Variable | Description | Scale |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | `upper_right_wp2019` … `axial_wp2019` | Region affected (≥1 site marked) | 0/1 |
 | `nr_regions_wp2019` | Number of affected regions (0–5) | 0–5 |
 | `WPI_AGE` | Widespread Pain Index | 0–19 |
@@ -651,8 +667,8 @@ processed <- processed %>%
 
 The PSQ measures generalised pain sensitivity using hypothetical pain scenarios rated 0–10. Two versions are scored:
 
-- **PSQ-17**: all 17 items (VAR21_1–17), mean range 0–10.
-- **PSQ-14**: 14 items, excluding items 5, 9, and 13 (VAR21_5, VAR21_9, VAR21_13). These three items describe thermal pain stimuli and are omitted in the PSQ-14 version to reduce thermal bias, mean range 0–10.
+-   **PSQ-17**: all 17 items (VAR21_1–17), mean range 0–10.
+-   **PSQ-14**: 14 items, excluding items 5, 9, and 13 (VAR21_5, VAR21_9, VAR21_13). These three items describe thermal pain stimuli and are omitted in the PSQ-14 version to reduce thermal bias, mean range 0–10.
 
 Both scores use `rowMeans` with `na.rm = FALSE` so that any respondent with missing items receives NA rather than a score based on a partial set of items.
 
@@ -702,22 +718,22 @@ The HADS contains both negative items (agreeing most indicated the individual is
 
 **Item classification:**
 
-| VAR | Item | Subscale | Type | \_1 option | \_1 weight |
-|------------|------------|------------|------------|------------|------------|
-| VAR25 | Jag känner mig spänd och nervös | Anxiety | Negative | Mestadels | 3 |
-| VAR26 | Jag uppskattar fortfarande saker... | Depression | Positive | Definitivt lika mycket | 0 |
-| VAR27 | Jag har en känsla av att något hemskt... | Anxiety | Negative | Mycket klart och obehagligt | 3 |
-| VAR28 | Jag kan skratta och se det roliga... | Depression | Positive | Lika ofta som tidigare | 0 |
-| VAR29 | Jag bekymrar mig över saker | Anxiety | Negative | Mestadels | 3 |
-| VAR30 | Jag känner mig på gott humör | Depression | Positive | Mestadels | 0 |
-| VAR31 | Jag kan sitta stilla och känna mig avslappnad | Anxiety | Positive | Absolut | 0 |
-| VAR32 | Allting känns trögt | Depression | Negative | Nästan alltid | 3 |
-| VAR33 | Jag känner mig orolig, som om jag hade fjärilar... | Anxiety | Negative | Väldigt ofta | 3 |
-| VAR34 | Jag har tappat intresset för hur jag ser ut | Depression | Negative | Fullständigt | 3 |
-| VAR35 | Jag känner mig rastlös | Anxiety | Negative | Väldigt ofta | 3 |
-| VAR36 | Jag ser med glädje fram emot saker och ting | Depression | Positive | Lika mycket som tidigare | 0 |
-| VAR37 | Jag får plötsliga panikkänslor | Anxiety | Negative | Väldigt ofta | 3 |
-| VAR38 | Jag kan uppskatta en god bok, ett TV-program... | Depression | Positive | Ofta | 0 |
+| VAR | Swedish question | English question | Subscale | Type | \_1 option | \_1 weight |
+|----|----|----|----|----|----|----|
+| VAR25 | Jag känner mig spänd och nervös | I feel tense or 'wound up' | Anxiety | Negative | Mestadels | 3 |
+| VAR26 | Jag uppskattar fortfarande saker jag tidigare uppskattat | I still enjoy the things I used to enjoy | Depression | Positive | Definitivt lika mycket | 0 |
+| VAR27 | Jag har en känsla av att något hemskt kommer att hända | I get a sort of frightened feeling as if something awful is about to happen | Anxiety | Negative | Mycket klart och obehagligt | 3 |
+| VAR28 | Jag kan skratta och se det roliga i saker och ting | I can laugh and see the funny side of things | Depression | Positive | Lika ofta som tidigare | 0 |
+| VAR29 | Jag bekymrar mig över saker | Worrying thoughts go through my mind | Anxiety | Negative | Mestadels | 3 |
+| VAR30 | Jag känner mig på gott humör | I feel cheerful | Depression | Positive | Mestadels | 0 |
+| VAR31 | Jag kan sitta stilla och känna mig avslappnad | I can sit at ease and feel relaxed | Anxiety | Positive | Absolut | 0 |
+| VAR32 | Allting känns trögt | I feel as if I am slowed down | Depression | Negative | Nästan alltid | 3 |
+| VAR33 | Jag känner mig orolig, som om jag hade fjärilar i magen | I get a sort of frightened feeling like 'butterflies' in the stomach | Anxiety | Negative | Väldigt ofta | 3 |
+| VAR34 | Jag har tappat intresset för hur jag ser ut | I have lost interest in my appearance | Depression | Negative | Fullständigt | 3 |
+| VAR35 | Jag känner mig rastlös | I feel restless as if I have to be on the move | Anxiety | Negative | Väldigt ofta | 3 |
+| VAR36 | Jag ser med glädje fram emot saker och ting | I look forward with enjoyment to things | Depression | Positive | Lika mycket som tidigare | 0 |
+| VAR37 | Jag får plötsliga panikkänslor | I get sudden feelings of panic | Anxiety | Negative | Väldigt ofta | 3 |
+| VAR38 | Jag kan uppskatta en god bok, ett TV- eller radioprogram | I can enjoy a good book or radio or TV programme | Depression | Positive | Ofta | 0 |
 
 `score_had_N()` and `score_had_P()` are helper functions that score one HAD item given a dataframe and a base variable name. Both assign weights 3, 2, 1, 0 to the four response options — `score_had_N` in that order (first option = most distress), and `score_had_P` in reverse order (first option = least distress).
 
@@ -801,7 +817,7 @@ processed$ISI <- isi_severity + isi_impact
 Physical activity is captured in two separate dimensions — vigorous exercise (PE) and everyday activity (PA) — and for each dimension both time and days per week are recorded.
 
 | Variable | Question | Source | Scale |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | `PE_time` | Time per week spent on vigorous exercise (e.g. running, gym) | VAR45, Q27 | 0 = none … 5 = \>120 min |
 | `PE_days` | Days per week with ≥30 min vigorous exercise | VAR46, Q28 | 0–7 days |
 | `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = \>300 min |
@@ -821,7 +837,7 @@ processed$PA_days <- rowSums(processed[, paste0("VAR48_", 1:8)] * 0:7)
 `smoke` captures current smoking status on a four level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
 
 | Variable | Question | Source | Scale |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | `smoke` | Smoking status | VAR49, Q31a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
 | `ant_smoke` | Cigarettes/cigarillos per day | VAR50, Q31b | 0 = not daily; 1 = 1–9/day, 2 = 10–19/day, 3 = ≥20/day |
 
@@ -836,7 +852,7 @@ processed$ant_smoke[processed$smoke < 3] <- 0
 `snus` and `ant_snus` follow the same structure as the smoking variables. `ant_snus` records cans of snus per week and is set to 0 for respondents who do not use snus daily.
 
 | Variable | Question | Source | Scale |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | `snus` | Snus use status | VAR51, Q32a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
 | `ant_snus` | Cans of snus per week | VAR52, Q32b | 0 = not daily; 1 = 1–3/week, 2 = 4–6/week, 3 = ≥7/week |
 
