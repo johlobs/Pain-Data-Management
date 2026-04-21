@@ -752,6 +752,17 @@ processed$ISI <- isi_severity + isi_impact
 
 #### Physical activity
 
+Physical activity is captured in two separate dimensions — vigorous exercise (PE) and everyday activity (PA) — and for each dimension both time and days per week are recorded.
+
+| Variable | Question | Source | Scale |
+|---|---|---|---|
+| `PE_time` | Time per week spent on vigorous exercise (e.g. running, gym) | VAR45, Q27 | 0 = none … 5 = >120 min |
+| `PE_days` | Days per week with ≥30 min vigorous exercise | VAR46, Q28 | 0–7 days |
+| `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = >300 min |
+| `PA_days` | Days per week with ≥30 min everyday activity | VAR48, Q30 | 0–7 days |
+
+All four variables are exclusive-coded and converted to ordinal scores using `rowSums * weights`.
+
 ```{r}
 processed$PE_time <- rowSums(processed[, paste0("VAR45_", 1:6)] * 0:5)
 processed$PE_days <- rowSums(processed[, paste0("VAR46_", 1:8)] * 0:7)
@@ -761,18 +772,32 @@ processed$PA_days <- rowSums(processed[, paste0("VAR48_", 1:8)] * 0:7)
 
 #### Smoking
 
+`smoke` captures current smoking status on a four-level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
+
+| Variable | Question | Source | Scale |
+|---|---|---|---|
+| `smoke` | Smoking status | VAR49, Q31a | 0 = never/quit >6 m, 1 = quit <6 m, 2 = occasional, 3 = daily |
+| `ant_smoke` | Cigarettes/cigarillos per day | VAR50, Q31b | 0 = not daily; 1 = 1–9/day, 2 = 10–19/day, 3 = ≥20/day |
+
 ```{r}
 processed$smoke     <- rowSums(processed[, paste0("VAR49_", 1:4)] * 0:3)
 processed$ant_smoke <- rowSums(processed[, paste0("VAR50_", 1:3)] * 1:3)
 processed$ant_smoke[processed$smoke < 3] <- 0
 ```
 
-#### Snuff
+#### Snus
+
+`snus` and `ant_snus` follow the same structure as the smoking variables. `ant_snus` records cans of snus per week and is set to 0 for respondents who do not use snus daily.
+
+| Variable | Question | Source | Scale |
+|---|---|---|---|
+| `snus` | Snus use status | VAR51, Q32a | 0 = never/quit >6 m, 1 = quit <6 m, 2 = occasional, 3 = daily |
+| `ant_snus` | Cans of snus per week | VAR52, Q32b | 0 = not daily; 1 = 1–3/week, 2 = 4–6/week, 3 = ≥7/week |
 
 ```{r}
-processed$snuff     <- rowSums(processed[, paste0("VAR51_", 1:4)] * 0:3)
-processed$ant_snuff <- rowSums(processed[, paste0("VAR52_", 1:3)] * 1:3)
-processed$ant_snuff[processed$snuff < 3] <- 0
+processed$snus     <- rowSums(processed[, paste0("VAR51_", 1:4)] * 0:3)
+processed$ant_snus <- rowSums(processed[, paste0("VAR52_", 1:3)] * 1:3)
+processed$ant_snus[processed$snus < 3] <- 0
 ```
 
 ------------------------------------------------------------------------
