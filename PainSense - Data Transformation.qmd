@@ -492,19 +492,39 @@ The 45 pain locations (VAR12) are assigned to five body regions. A region is con
 | lower_left_wp2019  | Left lower body  |
 | axial_wp2019       | Axial skeleton   |
 
-**Widespread Pain Index (WPI_AGE)**
+**Derived variables overview**
 
-The WPI counts 19 bilateral anatomical areas. Each area is scored as 1 if pain is reported on either or both sides, giving a maximum score of 19. Respondents who reported no pain in the past seven days are assigned a WPI of 0.
+| Variable | Description | Scale |
+|---|---|---|
+| `upper_right_wp2019` … `axial_wp2019` | Region affected (≥1 site marked) | 0/1 |
+| `nr_regions_wp2019` | Number of affected regions (0–5) | 0–5 |
+| `WPI_AGE` | Widespread Pain Index | 0–19 |
+| `WP2019_AGE` | Widespread pain by WP2019 criteria | 0/1 |
+| `CP_WP2019_AGE` | Chronic widespread pain (WP2019) | 0/1 |
+| `Pain3cat_CWSP2019` | Pain category: 0 = none, 1 = chronic non-widespread, 2 = chronic widespread | 0–2 |
 
-**Classification**
+#### Body region sums
 
-A respondent is classified as having widespread pain (WP2019_AGE = 1) if the WPI exceeds 6 and pain is present in more than 3 of the 5 body regions.
+Each region is coded 1 if at least one of its pain locations is marked, 0 otherwise. The same `named list + map_dfc` pattern as ACR90 is used, but with a `> 0` threshold instead of a raw sum.
 
-CP_WP2019_AGE is set to 1 when a respondent meets both the WP2019 criterion and the chronic pain criterion.
+```{r}
+wp2019_regions <- list(
+  upper_right_wp2019 = c("VAR12_2","VAR12_23","VAR12_5","VAR12_26","VAR12_7","VAR12_28","VAR12_9","VAR12_11","VAR12_30","VAR12_32"),
+  upper_left_wp2019  = c("VAR12_1","VAR12_24","VAR12_4","VAR12_27","VAR12_6","VAR12_29","VAR12_8","VAR12_10","VAR12_31","VAR12_33"),
+  lower_right_wp2019 = c("VAR12_18","VAR12_38","VAR12_40","VAR12_20","VAR12_22","VAR12_42","VAR12_44"),
+  lower_left_wp2019  = c("VAR12_17","VAR12_39","VAR12_41","VAR12_19","VAR12_21","VAR12_43","VAR12_45"),
+  axial_wp2019       = c("VAR12_3","VAR12_25","VAR12_34","VAR12_35","VAR12_36","VAR12_37","VAR12_12","VAR12_13","VAR12_14","VAR12_15")
+)
 
-Pain3cat_CWSP2019 provides a three-category pain classification. A value of 0 indicates no chronic pain. A value of 1 indicates chronic non-widespread pain. A value of 2 indicates chronic widespread pain.
+processed <- processed %>%
+  bind_cols(map_dfc(wp2019_regions, ~ as.integer(rowSums(processed[, .x]) > 0)))
+```
 
-The WPI is calculated using `calc_wpi()`, which takes a dataframe and scores each of the 19 bilateral areas as 1 if at least one location within that area is marked, and 0 otherwise. The total WPI is the sum across all 19 areas.
+#### Widespread Pain Index (WPI_AGE)
+
+The WPI counts 19 bilateral anatomical areas. Each area scores 1 if pain is reported on either or both sides, giving a maximum of 19. `calc_wpi()` iterates over the 19 area definitions and returns a row-wise sum.
+
+Respondents who did not answer VAR11 (pain presence) are set to NA. Those who reported no pain are assigned WPI = 0 rather than NA, since a score of 0 is substantively meaningful for this group.
 
 ```{r}
 calc_wpi <- function(df) {
@@ -530,50 +550,40 @@ calc_wpi <- function(df) {
     c("VAR12_14", "VAR12_15")
   )
 
-  scores <- sapply(areas, function(cols) {
-    as.integer(rowSums(df[, cols, drop = FALSE], na.rm = FALSE) > 0)
-  })
-
-  rowSums(scores)
+  map(areas, ~ as.integer(rowSums(df[, .x, drop = FALSE], na.rm = FALSE) > 0)) %>%
+    bind_cols() %>%
+    rowSums()
 }
-```
-
-```{r}
-upper_right_wp2019 <- ifelse(processed$VAR12_2==1|processed$VAR12_23==1|processed$VAR12_5==1|
-                             processed$VAR12_26==1|processed$VAR12_7==1|processed$VAR12_28==1|
-                             processed$VAR12_9==1|processed$VAR12_11==1|processed$VAR12_30==1|
-                             processed$VAR12_32==1, 1, 0)
-upper_left_wp2019  <- ifelse(processed$VAR12_1==1|processed$VAR12_24==1|processed$VAR12_4==1|
-                             processed$VAR12_27==1|processed$VAR12_6==1|processed$VAR12_29==1|
-                             processed$VAR12_8==1|processed$VAR12_10==1|processed$VAR12_31==1|
-                             processed$VAR12_33==1, 1, 0)
-lower_right_wp2019 <- ifelse(processed$VAR12_18==1|processed$VAR12_38==1|processed$VAR12_40==1|
-                             processed$VAR12_20==1|processed$VAR12_22==1|processed$VAR12_42==1|
-                             processed$VAR12_44==1, 1, 0)
-lower_left_wp2019  <- ifelse(processed$VAR12_17==1|processed$VAR12_39==1|processed$VAR12_41==1|
-                             processed$VAR12_19==1|processed$VAR12_21==1|processed$VAR12_43==1|
-                             processed$VAR12_45==1, 1, 0)
-axial_wp2019       <- ifelse(processed$VAR12_3==1|processed$VAR12_25==1|processed$VAR12_34==1|
-                             processed$VAR12_35==1|processed$VAR12_36==1|processed$VAR12_37==1|
-                             processed$VAR12_12==1|processed$VAR12_13==1|processed$VAR12_14==1|
-                             processed$VAR12_15==1, 1, 0)
-nr_regions_wp2019 <- upper_right_wp2019 + upper_left_wp2019 + lower_right_wp2019 +
-                     lower_left_wp2019 + axial_wp2019
 
 processed$WPI_AGE <- calc_wpi(processed)
 
-processed$WPI_AGE <- ifelse(is.na(processed$pain7days), NA, processed$WPI_AGE)
-processed$WPI_AGE <- ifelse(is.na(processed$WPI_AGE) & processed$pain7days == 0, 0, processed$WPI_AGE)
+processed <- processed %>%
+  mutate(
+    WPI_AGE = case_when(
+      is.na(pain7days) ~ NA_real_,
+      pain7days == 0   ~ 0,
+      TRUE             ~ WPI_AGE
+    )
+  )
+```
 
-processed$WP2019_AGE    <- as.integer(processed$WPI_AGE > 6 & nr_regions_wp2019 > 3)
-processed$CP_WP2019_AGE <- as.integer(processed$chronic_pain == 1 & processed$WP2019_AGE == 1)
+#### Classification
 
-processed$Pain3cat_CWSP2019 <- ifelse(
-  processed$chronic_pain == 1 & processed$CP_WP2019_AGE == 1, 2,
-  ifelse(processed$chronic_pain == 1, 1, 0))
+A respondent is classified as having widespread pain (`WP2019_AGE = 1`) if the WPI exceeds 6 and pain is present in more than 3 of the 5 body regions. `Pain3cat_CWSP2019` provides a three-level summary combining chronicity and widespread pain.
 
-rm(upper_right_wp2019, upper_left_wp2019, lower_right_wp2019,
-   lower_left_wp2019, axial_wp2019, nr_regions_wp2019)
+```{r}
+processed <- processed %>%
+  mutate(
+    nr_regions_wp2019 = upper_right_wp2019 + upper_left_wp2019 + lower_right_wp2019 +
+                        lower_left_wp2019  + axial_wp2019,
+    WP2019_AGE        = as.integer(WPI_AGE > 6 & nr_regions_wp2019 > 3),
+    CP_WP2019_AGE     = as.integer(chronic_pain == 1 & WP2019_AGE == 1),
+    Pain3cat_CWSP2019 = case_when(
+      chronic_pain == 1 & CP_WP2019_AGE == 1 ~ 2,  # chronic widespread pain
+      chronic_pain == 1                       ~ 1,  # chronic non-widespread pain
+      TRUE                                    ~ 0   # no chronic pain
+    )
+  )
 ```
 
 ### Treatments (VAR20)
