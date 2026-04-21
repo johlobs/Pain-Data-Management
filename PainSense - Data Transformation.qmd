@@ -47,7 +47,7 @@ processed <- read_excel(filepath, sheet = "Data")
 Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
 
 | Class | Description | Processing |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
 | **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
 | **matrix** | Independent sub-items with own scale | Left unchanged |
@@ -404,13 +404,13 @@ The 1990 American College of Rheumatology (ACR) criteria classify pain as widesp
 
 The 45 pain locations (VAR12) are grouped into five regions:
 
-| Region                | Description      |
-|-----------------------|------------------|
-| upper_right_acr90     | Right upper body |
-| upper_left_acr90      | Left upper body  |
-| lower_right_acr90     | Right lower body |
-| lower_left_acr90      | Left lower body  |
-| axial_acr90           | Axial skeleton   |
+| Region            | Description      |
+|-------------------|------------------|
+| upper_right_acr90 | Right upper body |
+| upper_left_acr90  | Left upper body  |
+| lower_right_acr90 | Right lower body |
+| lower_left_acr90  | Left lower body  |
+| axial_acr90       | Axial skeleton   |
 
 **Classification**
 
@@ -445,13 +445,13 @@ Widespread pain according to the 2019 classification is determined by two comple
 
 The 45 pain locations (VAR12) are assigned to five body regions. A region is considered affected if at least one location within it is marked.
 
-| Region                | Description      |
-|-----------------------|------------------|
-| upper_right_wp2019    | Right upper body |
-| upper_left_wp2019     | Left upper body  |
-| lower_right_wp2019    | Right lower body |
-| lower_left_wp2019     | Left lower body  |
-| axial_wp2019          | Axial skeleton   |
+| Region             | Description      |
+|--------------------|------------------|
+| upper_right_wp2019 | Right upper body |
+| upper_left_wp2019  | Left upper body  |
+| lower_right_wp2019 | Right lower body |
+| lower_left_wp2019  | Left lower body  |
+| axial_wp2019       | Axial skeleton   |
 
 **Widespread Pain Index (WPI_AGE)**
 
@@ -602,7 +602,7 @@ The HADS contains both negative items (agreeing most indicated the individual is
 **Item classification:**
 
 | VAR | Item | Subscale | Type | \_1 option | \_1 weight |
-|------------|------------|------------|------------|------------|------------|
+|----|----|----|----|----|----|
 | VAR25 | Jag känner mig spänd och nervös | Anxiety | Negative | Mestadels | 3 |
 | VAR26 | Jag uppskattar fortfarande saker... | Depression | Positive | Definitivt lika mycket | 0 |
 | VAR27 | Jag har en känsla av att något hemskt... | Anxiety | Negative | Mycket klart och obehagligt | 3 |
