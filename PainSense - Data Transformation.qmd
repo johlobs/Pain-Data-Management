@@ -368,19 +368,58 @@ processed <- processed %>%
 
 ### Pain variables
 
+This section derives core pain variables from the raw survey data. The variables fall into four conceptual groups: *presence of pain*, *chronicity*, *pain character*, and *pain intensity*. Together they form the foundation for most downstream analyses in this document.
+
+**Derived variables overview**
+
+| Variable | Source | Scale | Interpretation |
+|---|---|---|---|
+| `pain7days` | VAR11_1 | 0/1 | 1 = pain in the past 7 days |
+| `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<3 months, …, 4 = \>10 years |
+| `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 6 months |
+| `persistent` | VAR18_2 | 0/1 | 0 = periodic, 1 = persistent |
+| `pain_freq` | VAR16_1–5 | 1–5 | 1 = rarely, 5 = always |
+| `nrs_mean7d` | VAR13_1–11 | 0–10 | Mean pain intensity past 7 days (NRS) |
+| `nrs_rest7d` | VAR14_1–11 | 0–10 | Pain at rest past 7 days (NRS) |
+| `nrs_move7d` | VAR15_1–11 | 0–10 | Pain during movement past 7 days (NRS) |
+
+#### Presence of pain
+
+`pain7days` is the gating variable for most pain-related variables: respondents who report no pain in the past 7 days are not asked about intensity, duration, or location.
+
 ```{r}
 processed$pain7days <- processed$VAR11_1  # 1 = yes, 0 = no
+```
 
+#### Chronicity
+
+`pain_duration` converts the exclusive-coded VAR17 columns into a single numeric value using the `rowSums(...* 0:4)` pattern: each VAR17_k column is 1 for the selected option and 0 otherwise, so multiplying by the weight vector `0:4` and summing gives the ordinal score for the chosen category.
+
+`chronic_pain` is 1 if the respondent has current pain (`pain7days == 1`) and reports pain duration of at least 6 months (score ≥ 2). Respondents who did not answer VAR11 are set to NA rather than 0.
+
+```{r}
 processed$pain_duration <- rowSums(processed[, paste0("VAR17_", 1:5)] * 0:4)
 
 processed$chronic_pain <- ifelse(
   processed$pain7days == 1 & processed$pain_duration >= 2, 1, 0)
 processed$chronic_pain[is.na(processed$pain7days)] <- NA
+```
 
+#### Pain character
+
+`persistent` distinguishes periodic from persistent pain. `pain_freq` summarises how often the respondent experiences pain using the same `rowSums * weight` approach as `pain_duration`, here with weights 1–5.
+
+```{r}
 processed$persistent <- processed$VAR18_2  # 0 = periodisk, 1 = ihållande
 
 processed$pain_freq <- rowSums(processed[, paste0("VAR16_", 1:5)] * 1:5)
+```
 
+#### Pain intensity (NRS)
+
+Three NRS (Numeric Rating Scale, 0–10) variables capture different aspects of pain intensity over the past 7 days. Each is encoded as 11 exclusive columns (VAR_1 = score 0, VAR_11 = score 10), converted to a numeric value with `rowSums(...* 0:10)`.
+
+```{r}
 processed$nrs_mean7d <- rowSums(processed[, paste0("VAR13_", 1:11)] * 0:10)
 processed$nrs_rest7d <- rowSums(processed[, paste0("VAR14_", 1:11)] * 0:10)
 processed$nrs_move7d <- rowSums(processed[, paste0("VAR15_", 1:11)] * 0:10)
@@ -419,22 +458,22 @@ A respondent is classified as having widespread pain (ACR90 = 1) if pain is repo
 ChronicP_ACR90 is set to 1 when a respondent meets both the ACR90 criterion and the chronic pain criterion.
 
 ```{r}
-processed$upper_right_acr90 <- rowSums(processed[, c("VAR12_5","VAR12_7","VAR12_9","VAR12_11",
-                                                      "VAR12_26","VAR12_28","VAR12_30","VAR12_32")])
-processed$upper_left_acr90  <- rowSums(processed[, c("VAR12_4","VAR12_6","VAR12_8","VAR12_10",
-                                                      "VAR12_27","VAR12_29","VAR12_31","VAR12_33")])
-processed$lower_right_acr90 <- rowSums(processed[, c("VAR12_18","VAR12_20","VAR12_22",
-                                                      "VAR12_38","VAR12_40","VAR12_42","VAR12_44")])
-processed$lower_left_acr90  <- rowSums(processed[, c("VAR12_17","VAR12_19","VAR12_21",
-                                                      "VAR12_39","VAR12_41","VAR12_43","VAR12_45")])
-processed$axial_acr90       <- rowSums(processed[, c("VAR12_3","VAR12_12","VAR12_13","VAR12_25",
-                                                      "VAR12_34","VAR12_35","VAR12_36","VAR12_37")])
+acr90_regions <- list(
+  upper_right_acr90 = c("VAR12_5","VAR12_7","VAR12_9","VAR12_11","VAR12_26","VAR12_28","VAR12_30","VAR12_32"),
+  upper_left_acr90  = c("VAR12_4","VAR12_6","VAR12_8","VAR12_10","VAR12_27","VAR12_29","VAR12_31","VAR12_33"),
+  lower_right_acr90 = c("VAR12_18","VAR12_20","VAR12_22","VAR12_38","VAR12_40","VAR12_42","VAR12_44"),
+  lower_left_acr90  = c("VAR12_17","VAR12_19","VAR12_21","VAR12_39","VAR12_41","VAR12_43","VAR12_45"),
+  axial_acr90       = c("VAR12_3","VAR12_12","VAR12_13","VAR12_25","VAR12_34","VAR12_35","VAR12_36","VAR12_37")
+)
 
-processed$contralat_1 <- ifelse(processed$axial_acr90 > 0 & processed$lower_left_acr90  > 0 & processed$upper_right_acr90 > 0, 1, 0)
-processed$contralat_2 <- ifelse(processed$axial_acr90 > 0 & processed$lower_right_acr90 > 0 & processed$upper_left_acr90  > 0, 1, 0)
-
-processed$ACR90          <- ifelse(processed$contralat_1 == 1 | processed$contralat_2 == 1, 1, 0)
-processed$ChronicP_ACR90 <- ifelse(processed$chronic_pain == 1 & processed$ACR90 == 1, 1, 0)
+processed <- processed %>%
+  bind_cols(map_dfc(acr90_regions, ~ rowSums(processed[, .x]))) %>%
+  mutate(
+    contralat_1    = as.integer(axial_acr90 > 0 & lower_left_acr90  > 0 & upper_right_acr90 > 0),
+    contralat_2    = as.integer(axial_acr90 > 0 & lower_right_acr90 > 0 & upper_left_acr90  > 0),
+    ACR90          = as.integer(contralat_1 == 1 | contralat_2 == 1),
+    ChronicP_ACR90 = as.integer(chronic_pain == 1 & ACR90 == 1)
+  )
 ```
 
 ### Widespread pain — WP2019
