@@ -723,19 +723,27 @@ processed$sci93 <- rowSums(processed[, paste0("VAR39_", 1:35)])
 
 ### ISI (Insomnia Severity Index)
 
-VAR40_1–3: sleep items shifted to 0–4 (via shift_vars above). Sum range 0–12. VAR41–44: 5-option Likert items recoded to 0/1; scored 0–4 each. Total range 0–28.
+The ISI total score (range 0–28) is the sum of two subscales:
+
+- **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
+- **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
+
+`exclusive_score()` converts any exclusive-coded variable to a numeric score by multiplying each binary column by its ordinal weight (0, 1, 2, …) and summing — the same logic as `rowSums(...* 0:4)` used elsewhere, but named for readability.
 
 ```{r}
-processed$ISI <-
-  rowSums(processed[, paste0("VAR40_", 1:3)]) +
-  processed$VAR41_1*0 + processed$VAR41_2*1 + processed$VAR41_3*2 +
-    processed$VAR41_4*3 + processed$VAR41_5*4 +
-  processed$VAR42_1*0 + processed$VAR42_2*1 + processed$VAR42_3*2 +
-    processed$VAR42_4*3 + processed$VAR42_5*4 +
-  processed$VAR43_1*0 + processed$VAR43_2*1 + processed$VAR43_3*2 +
-    processed$VAR43_4*3 + processed$VAR43_5*4 +
-  processed$VAR44_1*0 + processed$VAR44_2*1 + processed$VAR44_3*2 +
-    processed$VAR44_4*3 + processed$VAR44_5*4
+exclusive_score <- function(df, var, n) {
+  rowSums(df[, paste0(var, "_", 1:n)] * seq(0, n - 1))
+}
+
+isi_severity <- rowSums(processed[, paste0("VAR40_", 1:3)])
+
+isi_impact <-
+  exclusive_score(processed, "VAR41", 5) +
+  exclusive_score(processed, "VAR42", 5) +
+  exclusive_score(processed, "VAR43", 5) +
+  exclusive_score(processed, "VAR44", 5)
+
+processed$ISI <- isi_severity + isi_impact
 ```
 
 ------------------------------------------------------------------------
