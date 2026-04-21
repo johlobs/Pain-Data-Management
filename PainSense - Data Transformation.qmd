@@ -47,7 +47,7 @@ processed <- read_excel(filepath, sheet = "Data")
 Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
 
 | Class | Description | Processing |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
 | **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
 | **matrix** | Independent sub-items with own scale | Left unchanged |
@@ -181,11 +181,11 @@ This chapter cross-checks the manual classification from Chapter 2 against the m
 
 `verify_classification()` takes the `group_info` table built in Chapter 2 and runs five checks:
 
-1. **Unclassified variables** — any `VARnn` base that does not appear in `exclusive`, `non_exclusive`, or `matrix_groups`.
-2. **Exclusive classified as Matrix in VariableView** — the Type column in VariableView says "Matrix" but the variable is in the `exclusive` vector.
-3. **Exclusive with "Flera alternativ" in label** — the question label suggests multiple answers are allowed, which contradicts exclusive classification.
-4. **Matrix classified as Check Boxes in VariableView** — the Type column says "Check Boxes" (i.e. non-exclusive) but the variable is in `matrix_groups`.
-5. **Exclusive with more than 11 sub-items** — a single-select question rarely has more than 11 options; a high count may indicate a misclassification.
+1.  **Unclassified variables** — any `VARnn` base that does not appear in `exclusive`, `non_exclusive`, or `matrix_groups`.
+2.  **Exclusive classified as Matrix in VariableView** — the Type column in VariableView says "Matrix" but the variable is in the `exclusive` vector.
+3.  **Exclusive with "Flera alternativ" in label** — the question label suggests multiple answers are allowed, which contradicts exclusive classification.
+4.  **Matrix classified as Check Boxes in VariableView** — the Type column says "Check Boxes" (i.e. non-exclusive) but the variable is in `matrix_groups`.
+5.  **Exclusive with more than 11 sub-items** — a single-select question rarely has more than 11 options; a high count may indicate a misclassification.
 
 Issues are printed to the console but do not stop the script, so all checks run regardless. The function returns the warning messages invisibly so they can be captured programmatically if needed.
 
@@ -288,8 +288,8 @@ All variables are standardized before any derived variables are created in Chapt
 
 Two transformations are applied depending on variable type:
 
-- **Recode** (`recode_vars`): binary exclusive variables are raw-coded **1 = Ja, 2 = Nej** by Sunet Survey. These are recoded to **1 = yes, 0 = no** so that 1 consistently means "selected".
-- **Shift** (`shift_vars`): matrix variables use a **1–5** scale in the raw data. These are shifted to **0–4** so that 0 means "not at all" rather than 1.
+-   **Recode** (`recode_vars`): binary exclusive variables are raw-coded **1 = Ja, 2 = Nej** by Sunet Survey. These are recoded to **1 = yes, 0 = no** so that 1 consistently means "selected".
+-   **Shift** (`shift_vars`): matrix variables use a **1–5** scale in the raw data. These are shifted to **0–4** so that 0 means "not at all" rather than 1.
 
 In both cases, the missing code **999** is first replaced with NA.
 
@@ -344,11 +344,13 @@ processed$age <- resp_year - processed$birthyear
 
 ### Sex and gender identity
 
-The variables sex and gender identity will be recoded in Chapter 7 and 8.
+VAR04 (legal sex) and VAR05 (gender identity) are exclusively coded binary variables. They are collapsed to single numeric columns in Chapter 7 and given descriptive names in Chapter 8. No derived variables are created here.
 
 ### Body Mass Index
 
-BMI categories follow WHO classification (Weir & Jan, *StatPearls*, 2023).
+BMI is calculated from height (VAR06, cm) and weight (VAR07, kg) using the standard formula weight / (height / 100)². The `if_else` guard excludes respondents with missing or zero height to avoid division errors.
+
+Two categorical versions are derived following WHO classification (Weir & Jan, *StatPearls*, 2023): a four-category version (`BMI_4cat`) for general use and a six-category version (`BMI_6cat`) for analyses requiring finer obesity stratification.
 
 ```{r}
 processed <- processed %>%
@@ -378,19 +380,21 @@ processed <- processed %>%
 
 ### Education and origin
 
-Education in two categories for Rasch analysis: 0=gymnasium, grundskola and 1=university, högskola. Some other educational variables are recoded in Chapter 7 and 8.
+`edu_BIN` dichotomises education for Rasch analysis: 0 = non-university (grundskola, gymnasium), 1 = university or higher education. It is taken directly from VAR08_3, which is already 0/1 after Chapter 5 recoding. The full education variable (VAR08) is collapsed and renamed in Chapters 7 and 8.
+
+`origin` encodes birth country as an ordinal variable by combining three binary columns with weights: VAR09_2 (other Nordic) × 1, VAR09_3 (European non-Nordic) × 2, VAR09_4 (outside Europe) × 3. Respondents born in Sweden (VAR09_1) are the reference category and receive 0.
 
 ```{r}
-# edu_BIN: 0 = non-university, 1 = university
 processed$edu_BIN <- processed$VAR08_3
 
-# origin: 0 = Sweden, 1 = other Nordic, 2 = European non-Nordic, 3 = outside Europe
 processed$origin <- processed$VAR09_2 + 2 * processed$VAR09_3 + 3 * processed$VAR09_4
 ```
 
 ### Employment and pensioner
 
-Assuming if someone did not fill in any degree of occupation, sick leave or studies, it is equal to 0%. A person is categorized as pensioner if 65 years old and did not fill in any occupation degree.
+VAR10_1–3 record percentage of time spent in work, sick leave, and studies respectively. Missing values are treated as 0% on the assumption that respondents who left a field blank reported no activity in that category.
+
+`pensioner65` is 1 for respondents aged 65 or older who reported 0% across all three activity types, since this combination most likely reflects retirement rather than missing data.
 
 ```{r}
 processed <- processed %>%
@@ -411,7 +415,7 @@ This section derives core pain variables from the raw survey data. The variables
 **Derived variables overview**
 
 | Variable | Source | Scale | Interpretation |
-|---|---|---|---|
+|------------------|------------------|------------------|------------------|
 | `pain7days` | VAR11_1 | 0/1 | 1 = pain in the past 7 days |
 | `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<3 months, …, 4 = \>10 years |
 | `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 6 months |
@@ -535,7 +539,7 @@ The 45 pain locations (VAR12) are assigned to five body regions. A region is con
 **Derived variables overview**
 
 | Variable | Description | Scale |
-|---|---|---|
+|------------------------|------------------------|------------------------|
 | `upper_right_wp2019` … `axial_wp2019` | Region affected (≥1 site marked) | 0/1 |
 | `nr_regions_wp2019` | Number of affected regions (0–5) | 0–5 |
 | `WPI_AGE` | Widespread Pain Index | 0–19 |
@@ -628,23 +632,29 @@ processed <- processed %>%
 
 ### Treatments (VAR20)
 
-VAR20 is non-exclusive (multiple treatments possible). NA is treated as 0 (no treatment reported).
+Q14 asks whether the respondent has undergone any major pain treatment in the past 12 months. The question is non-exclusive so multiple options can be marked. NA is treated as 0 (treatment not reported).
+
+VAR20_4 and VAR20_7 are free-text follow-up fields ("type of surgery" and "type of other treatment") and are not included here.
 
 ```{r}
-for (col in paste0("VAR20_", c(1,2,3,5,6))) {
-  processed[[col]][is.na(processed[[col]])] <- 0
-}
-
-processed$trt_mmr       <- processed$VAR20_1
-processed$trt_neurostim  <- processed$VAR20_2
-processed$trt_surgery    <- processed$VAR20_3
-processed$trt_opioid     <- processed$VAR20_5
-processed$trt_other      <- processed$VAR20_6
+processed <- processed %>%
+  mutate(
+    trt_mmr       = replace_na(VAR20_1, 0), # multimodal pain rehabilitation
+    trt_neurostim = replace_na(VAR20_2, 0), # spinal cord stimulation
+    trt_surgery   = replace_na(VAR20_3, 0), # surgical procedure
+    trt_opioid    = replace_na(VAR20_5, 0), # opioid withdrawal programme
+    trt_other     = replace_na(VAR20_6, 0)  # other major treatment
+  )
 ```
 
 ### PSQ (Pain Sensitivity Questionnaire)
 
-PSQ-14 uses items 1–4, 6–8, 10–12, 14–17 (excludes items 5, 9, 13). PSQ-17 uses all 17 items.
+The PSQ measures generalised pain sensitivity using hypothetical pain scenarios rated 0–10. Two versions are scored:
+
+- **PSQ-17**: all 17 items (VAR21_1–17), mean range 0–10.
+- **PSQ-14**: 14 items, excluding items 5, 9, and 13 (VAR21_5, VAR21_9, VAR21_13). These three items describe thermal pain stimuli and are omitted in the PSQ-14 version to reduce thermal bias, mean range 0–10.
+
+Both scores use `rowMeans` with `na.rm = FALSE` so that any respondent with missing items receives NA rather than a score based on a partial set of items.
 
 ```{r}
 processed$psq14 <- rowMeans(processed[, paste0("VAR21_", c(1:4, 6:8, 10:12, 14:17))],
@@ -656,13 +666,15 @@ processed$psq17 <- rowMeans(processed[, paste0("VAR21_", 1:17)],
 
 ### CSI (Central Sensitization Inventory)
 
-CSI part A: 25 items, each shifted to 0–4. Sum range 0–100.
+The CSI measures symptoms associated with central sensitisation. It has two parts.
+
+**Part A** (VAR22, Q16) consists of 25 symptom items rated on a 1–5 scale, shifted to 0–4 in Chapter 5. The total score `csi` ranges from 0 to 100, with higher scores indicating greater central sensitisation.
 
 ```{r}
 processed$csi <- rowSums(processed[, paste0("VAR22_", 1:25)])
 ```
 
-CSI part B: physician diagnoses, shifted to 0 (No) / 1 (Yes).
+**Part B** (VAR23, Q17) asks whether a physician has diagnosed the respondent with any of 10 conditions associated with central sensitisation. Each item is already coded 0 (No) / 1 (Yes) after the shift in Chapter 5. The items are copied to descriptively named columns.
 
 ```{r}
 csi_b_names <- c("restlesslegs", "chronic_fatigue", "fibromyalgia", "TMD",
@@ -691,7 +703,7 @@ The HADS contains both negative items (agreeing most indicated the individual is
 **Item classification:**
 
 | VAR | Item | Subscale | Type | \_1 option | \_1 weight |
-|----|----|----|----|----|----|
+|------------|------------|------------|------------|------------|------------|
 | VAR25 | Jag känner mig spänd och nervös | Anxiety | Negative | Mestadels | 3 |
 | VAR26 | Jag uppskattar fortfarande saker... | Depression | Positive | Definitivt lika mycket | 0 |
 | VAR27 | Jag har en känsla av att något hemskt... | Anxiety | Negative | Mycket klart och obehagligt | 3 |
@@ -707,19 +719,16 @@ The HADS contains both negative items (agreeing most indicated the individual is
 | VAR37 | Jag får plötsliga panikkänslor | Anxiety | Negative | Väldigt ofta | 3 |
 | VAR38 | Jag kan uppskatta en god bok, ett TV-program... | Depression | Positive | Ofta | 0 |
 
+`score_had_N()` and `score_had_P()` are helper functions that score one HAD item given its base variable name. They read columns from `processed` directly. Both functions assign weights 3, 2, 1, 0 to the four response options — `score_had_N` in that order (first option = most distress), and `score_had_P` in reverse order (first option = least distress).
+
 ```{r}
-# N-items: _1 = most distress → weight 3
-# After recoding (2→0), _k = 1 if selected, 0 otherwise.
 score_had_N <- function(var) {
   3 * processed[[paste0(var, "_1")]] +
   2 * processed[[paste0(var, "_2")]] +
-  1 * processed[[paste0(var, "_3")]] +
-  0 * processed[[paste0(var, "_4")]]
+  1 * processed[[paste0(var, "_3")]]
 }
 
-# P-items: _1 = healthiest response → weight 0 (reverse-scored)
 score_had_P <- function(var) {
-  0 * processed[[paste0(var, "_1")]] +
   1 * processed[[paste0(var, "_2")]] +
   2 * processed[[paste0(var, "_3")]] +
   3 * processed[[paste0(var, "_4")]]
@@ -737,7 +746,7 @@ processed$had_a <-
   score_had_N("VAR37")     # m) N – panikkänslor
 
 # had_d: depression subscale (0–21)
-# Depression items: VAR26(P), VAR28(P), VAR30(P), VAR32(N), VAR34(N), VAR36(P), VAR38(P)
+# Items: VAR26(P), VAR28(P), VAR30(P), VAR32(N), VAR34(N), VAR36(P), VAR38(P)
 processed$had_d <-
   score_had_P("VAR26") +   # b) P – uppskattar fortfarande saker
   score_had_P("VAR28") +   # d) P – kan skratta och se det roliga
@@ -746,16 +755,13 @@ processed$had_d <-
   score_had_N("VAR34") +   # j) N – tappat intresset för utseende
   score_had_P("VAR36") +   # l) P – ser med glädje framemot saker
   score_had_P("VAR38")     # n) P – kan uppskatta bok/TV/radio
-
-summary(processed$had_a)
-summary(processed$had_d)
 ```
 
 ------------------------------------------------------------------------
 
 ### SCI-93
 
-35 items, each shifted from 1–5 to 0–4. Sum range 0–140.
+The SCI-93 (Symptoms Checklist 93) measures psychological distress across 35 items (VAR39, Q20–21). Each item was rated 1–5 and shifted to 0–4 in Chapter 5. The total score ranges from 0 to 140, with higher scores indicating greater distress.
 
 ```{r}
 processed$sci93 <- rowSums(processed[, paste0("VAR39_", 1:35)])
@@ -765,8 +771,8 @@ processed$sci93 <- rowSums(processed[, paste0("VAR39_", 1:35)])
 
 The ISI total score (range 0–28) is the sum of two subscales:
 
-- **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
-- **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
+-   **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
+-   **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
 
 `exclusive_score()` converts any exclusively coded variable to a numeric score by multiplying each binary column by its ordinal weight (0, 1, 2, …) and summing — the same logic as `rowSums(...* 0:4)` used elsewhere, but named for readability.
 
@@ -795,10 +801,10 @@ processed$ISI <- isi_severity + isi_impact
 Physical activity is captured in two separate dimensions — vigorous exercise (PE) and everyday activity (PA) — and for each dimension both time and days per week are recorded.
 
 | Variable | Question | Source | Scale |
-|---|---|---|---|
-| `PE_time` | Time per week spent on vigorous exercise (e.g. running, gym) | VAR45, Q27 | 0 = none … 5 = >120 min |
+|------------------|------------------|------------------|------------------|
+| `PE_time` | Time per week spent on vigorous exercise (e.g. running, gym) | VAR45, Q27 | 0 = none … 5 = \>120 min |
 | `PE_days` | Days per week with ≥30 min vigorous exercise | VAR46, Q28 | 0–7 days |
-| `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = >300 min |
+| `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = \>300 min |
 | `PA_days` | Days per week with ≥30 min everyday activity | VAR48, Q30 | 0–7 days |
 
 All four variables are exclusively coded and converted to ordinal scores using `rowSums * weights`.
@@ -815,8 +821,8 @@ processed$PA_days <- rowSums(processed[, paste0("VAR48_", 1:8)] * 0:7)
 `smoke` captures current smoking status on a four level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
 
 | Variable | Question | Source | Scale |
-|---|---|---|---|
-| `smoke` | Smoking status | VAR49, Q31a | 0 = never/quit >6 m, 1 = quit <6 m, 2 = occasional, 3 = daily |
+|------------------|------------------|------------------|------------------|
+| `smoke` | Smoking status | VAR49, Q31a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
 | `ant_smoke` | Cigarettes/cigarillos per day | VAR50, Q31b | 0 = not daily; 1 = 1–9/day, 2 = 10–19/day, 3 = ≥20/day |
 
 ```{r}
@@ -830,8 +836,8 @@ processed$ant_smoke[processed$smoke < 3] <- 0
 `snus` and `ant_snus` follow the same structure as the smoking variables. `ant_snus` records cans of snus per week and is set to 0 for respondents who do not use snus daily.
 
 | Variable | Question | Source | Scale |
-|---|---|---|---|
-| `snus` | Snus use status | VAR51, Q32a | 0 = never/quit >6 m, 1 = quit <6 m, 2 = occasional, 3 = daily |
+|------------------|------------------|------------------|------------------|
+| `snus` | Snus use status | VAR51, Q32a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
 | `ant_snus` | Cans of snus per week | VAR52, Q32b | 0 = not daily; 1 = 1–3/week, 2 = 4–6/week, 3 = ≥7/week |
 
 ```{r}
@@ -865,7 +871,7 @@ collapse_dummies <- function(df, prefix) {
 }
 ```
 
-HAD variables (VAR25–38) are scored above and then collapsed here. The collapsed value (0–3) represents the selected response option and can be used for descriptive purposes; the scored subscales `had_a` and `had_d` are used for analysis.
+All exclusively coded variable groups listed below are collapsed. The resulting single column contains the 0-based index of the selected option, which can be used for descriptive purposes. HAD variables (VAR25–38) are also included here; their collapsed values (0–3) represent the selected response option, while the scored subscales `had_a` and `had_d` from Chapter 6 are used for analysis.
 
 ```{r}
 variables_to_collapse <- c(
@@ -910,6 +916,8 @@ if (any_conflicts) {
 ------------------------------------------------------------------------
 
 ## Chapter 8: Rename variables and apply labels
+
+Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 6 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package.
 
 ```{r}
 final <- processed %>%
