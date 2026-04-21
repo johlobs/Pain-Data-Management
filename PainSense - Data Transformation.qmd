@@ -719,42 +719,42 @@ The HADS contains both negative items (agreeing most indicated the individual is
 | VAR37 | Jag får plötsliga panikkänslor | Anxiety | Negative | Väldigt ofta | 3 |
 | VAR38 | Jag kan uppskatta en god bok, ett TV-program... | Depression | Positive | Ofta | 0 |
 
-`score_had_N()` and `score_had_P()` are helper functions that score one HAD item given its base variable name. They read columns from `processed` directly. Both functions assign weights 3, 2, 1, 0 to the four response options — `score_had_N` in that order (first option = most distress), and `score_had_P` in reverse order (first option = least distress).
+`score_had_N()` and `score_had_P()` are helper functions that score one HAD item given a dataframe and a base variable name. Both assign weights 3, 2, 1, 0 to the four response options — `score_had_N` in that order (first option = most distress), and `score_had_P` in reverse order (first option = least distress).
 
 ```{r}
-score_had_N <- function(var) {
-  3 * processed[[paste0(var, "_1")]] +
-  2 * processed[[paste0(var, "_2")]] +
-  1 * processed[[paste0(var, "_3")]]
+score_had_N <- function(df, var) {
+  3 * df[[paste0(var, "_1")]] +
+  2 * df[[paste0(var, "_2")]] +
+  1 * df[[paste0(var, "_3")]]
 }
 
-score_had_P <- function(var) {
-  1 * processed[[paste0(var, "_2")]] +
-  2 * processed[[paste0(var, "_3")]] +
-  3 * processed[[paste0(var, "_4")]]
+score_had_P <- function(df, var) {
+  1 * df[[paste0(var, "_2")]] +
+  2 * df[[paste0(var, "_3")]] +
+  3 * df[[paste0(var, "_4")]]
 }
 
 # had_a: anxiety subscale (0–21)
 # Items: VAR25(N), VAR27(N), VAR29(N), VAR31(P), VAR33(N), VAR35(N), VAR37(N)
 processed$had_a <-
-  score_had_N("VAR25") +   # a) N – spänd och nervös
-  score_had_N("VAR27") +   # c) N – känsla av att något hemskt händer
-  score_had_N("VAR29") +   # e) N – bekymrar sig
-  score_had_P("VAR31") +   # g) P – kan sitta stilla och slappna av
-  score_had_N("VAR33") +   # i) N – fjärilar i magen
-  score_had_N("VAR35") +   # k) N – rastlös
-  score_had_N("VAR37")     # m) N – panikkänslor
+  score_had_N(processed, "VAR25") +   # a) N – spänd och nervös
+  score_had_N(processed, "VAR27") +   # c) N – känsla av att något hemskt händer
+  score_had_N(processed, "VAR29") +   # e) N – bekymrar sig
+  score_had_P(processed, "VAR31") +   # g) P – kan sitta stilla och slappna av
+  score_had_N(processed, "VAR33") +   # i) N – fjärilar i magen
+  score_had_N(processed, "VAR35") +   # k) N – rastlös
+  score_had_N(processed, "VAR37")     # m) N – panikkänslor
 
 # had_d: depression subscale (0–21)
 # Items: VAR26(P), VAR28(P), VAR30(P), VAR32(N), VAR34(N), VAR36(P), VAR38(P)
 processed$had_d <-
-  score_had_P("VAR26") +   # b) P – uppskattar fortfarande saker
-  score_had_P("VAR28") +   # d) P – kan skratta och se det roliga
-  score_had_P("VAR30") +   # f) P – på gott humör
-  score_had_N("VAR32") +   # h) N – allting känns tungt
-  score_had_N("VAR34") +   # j) N – tappat intresset för utseende
-  score_had_P("VAR36") +   # l) P – ser med glädje framemot saker
-  score_had_P("VAR38")     # n) P – kan uppskatta bok/TV/radio
+  score_had_P(processed, "VAR26") +   # b) P – uppskattar fortfarande saker
+  score_had_P(processed, "VAR28") +   # d) P – kan skratta och se det roliga
+  score_had_P(processed, "VAR30") +   # f) P – på gott humör
+  score_had_N(processed, "VAR32") +   # h) N – allting känns tungt
+  score_had_N(processed, "VAR34") +   # j) N – tappat intresset för utseende
+  score_had_P(processed, "VAR36") +   # l) P – ser med glädje framemot saker
+  score_had_P(processed, "VAR38")     # n) P – kan uppskatta bok/TV/radio
 ```
 
 ------------------------------------------------------------------------
