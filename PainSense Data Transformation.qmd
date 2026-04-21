@@ -538,7 +538,7 @@ The HADS contains both negative items (agreeing most indicated the individual is
 
 *Sources:*
 
--   Zigmond AS, Snaith RP. The hospital anxiety and depression scale. *Acta Psychiatrica Scandinavica*, 1983;67(6):361–370.
+- Zigmond AS, Snaith RP. The hospital anxiety and depression scale. *Acta Psychiatrica Scandinavica*, 1983;67(6):361–370.
 
 **Item classification:**
 
@@ -737,7 +737,7 @@ final <- processed %>%
     name                       = VAR01,
     personNumber               = VAR02,
     mailAdress                 = VAR03,
-    sex_legal                  = VAR04,
+    sexLegal                  = VAR04,
     gender                     = VAR05,
     height                     = VAR06,
     weight                     = VAR07,
@@ -752,12 +752,50 @@ final <- processed %>%
     painIntensityMovement7Days = VAR15,
     painFreq12Months           = VAR16,
     firstPainDuration          = VAR17,
-    painPersistence            = VAR18
+    painPersistence            = VAR18,
+    painTreatment12Months      = VAR20,
+    CSIDiagnosedByDoctor = VAR23,
+    healthRelatedIsDiagnosed = VAR24,
+    HAD1TenseOrWoundUp = VAR25,
+    HAD2EnjoysThingsIUsedTo = VAR26,
+    HAD3FrightFeelingSomethingBadWillHappen = VAR27,
+    HAD4LaughAndSeeFunnySideInThings = VAR28,
+    HAD5WorryingThoughtsThroughMinf = VAR29,
+    HAD6IsCheerful = VAR30,
+    HAD7AtEaseAndRelax = VAR31,
+    HAD8FeelsSlowedDown = VAR32,
+    HAD9FeelsButterflyStomach = VAR33,
+    HAD10NoInterestInAppearance = VAR34,
+    HAD11RestlessNeedToMove = VAR35,
+    HAD12LookForwardEnjoyment = VAR36,
+    HAD13SuddenPanicFeeling = VAR37,
+    HAD14EnjoyGoodBookOrRadioOrTv = VAR38,
+    sleep22TroubleFallingasleep = VAR40_1,
+    sleep22TroubleStayingAsleep = VAR40_2,
+    sleep22WakingUppTooEarly = VAR40_3,
+    sleepScheduleSatisfaction = VAR41,
+    badSleepAffectsDayFunction = VAR42,
+    noticeBadSleepLifeQuality = VAR43,
+    worriedAboutSleepProblem = VAR44,
+    physActHowMuchTimeShortBreath = VAR45,
+    physActAtLeast30MinShortBreath = VAR46,
+    physActTimeOnEverydayExercise = VAR47,
+    physActDaysSpent30MinExercise = VAR48,
+    smoker = VAR49,
+    howManyCigsPerDay = VAR50,
+    snuser = VAR51,
+    howManySnusPacksPerWeek = VAR52,
+    canWeContactLater = VAR53,
+      
+      
   ) %>%
   rename_with(
     ~ paste0("markedBody", str_extract(.x, "\\d+$")),
     matches("^VAR12_\\d+$")
-  )
+  ) 
+
+# TO BE HELPED
+# VAR12, VAR19, VAR21, VAR22, VAR39
 ```
 
 Apply variable labels from VariableView to remaining columns.
