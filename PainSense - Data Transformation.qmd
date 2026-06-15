@@ -47,7 +47,7 @@ processed <- read_excel(filepath, sheet = "Data")
 Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
 
 | Class | Description | Processing |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
 | **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
 | **matrix** | Independent sub-items with own scale | Left unchanged |
@@ -288,8 +288,8 @@ All variables are standardized before any derived variables are created in Chapt
 
 Two transformations are applied depending on variable type:
 
--   **Recode** (`recode_vars`): binary exclusive variables are raw-coded **1 = Ja, 2 = Nej** by Sunet Survey. These are recoded to **1 = yes, 0 = no** so that 1 consistently means "selected".
--   **Shift** (`shift_vars`): matrix variables use a **1–5** scale in the raw data. These are shifted to **0–4** so that 0 means "not at all" rather than 1.
+- **Recode** (`recode_vars`): binary exclusive variables are raw-coded **1 = Ja, 2 = Nej** by Sunet Survey. These are recoded to **1 = yes, 0 = no** so that 1 consistently means "selected".
+- **Shift** (`shift_vars`): matrix variables use a **1–5** scale in the raw data. These are shifted to **0–4** so that 0 means "not at all" rather than 1.
 
 In both cases, the missing code **999** is first replaced with NA.
 
@@ -415,7 +415,7 @@ This section derives core pain variables from the raw survey data. The variables
 **Derived variables overview**
 
 | Variable | Source | Scale | Interpretation |
-|----|----|----|----|
+|-----------------|-----------------|------------------|---------------------|
 | `pain7days` | VAR11_1 | 0/1 | 1 = pain in the past 7 days |
 | `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<1 month, …, 4 = ≥2 years |
 | `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 3 months |
@@ -555,7 +555,7 @@ The 45 pain locations (VAR12) are assigned to five body regions. A region is con
 **Derived variables overview**
 
 | Variable | Description | Scale |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | `upper_right_wp2019` … `axial_wp2019` | Region affected (≥1 site marked) | 0/1 |
 | `nr_regions_wp2019` | Number of affected regions (0–5) | 0–5 |
 | `WPI_AGE` | Widespread Pain Index | 0–19 |
@@ -667,16 +667,16 @@ processed <- processed %>%
 
 The PSQ measures generalised pain sensitivity using hypothetical pain scenarios rated 0–10. Two versions are scored:
 
--   **PSQ-17**: all 17 items (VAR21_1–17), mean range 0–10.
--   **PSQ-14**: 14 items, excluding items 5, 9, and 13 (VAR21_5, VAR21_9, VAR21_13). These three items describe thermal pain stimuli and are omitted in the PSQ-14 version to reduce thermal bias, mean range 0–10.
+- **PSQ-17**: all 17 items (VAR21_1–17), mean range 0–10.
+- **PSQ-14**: 14 items, excluding items 5, 9, and 13 (VAR21_5, VAR21_9, VAR21_13). These three items describe thermal pain stimuli and are omitted in the PSQ-14 version to reduce thermal bias, mean range 0–10.
 
 Both scores use `rowMeans` with `na.rm = FALSE` so that any respondent with missing items receives NA rather than a score based on a partial set of items.
 
 ```{r}
-processed$psq14 <- rowMeans(processed[, paste0("VAR21_", c(1:4, 6:8, 10:12, 14:17))],
+processed$psq14_sum <- rowMeans(processed[, paste0("VAR21_", c(1:4, 6:8, 10:12, 14:17))],
                              na.rm = FALSE)
 
-processed$psq17 <- rowMeans(processed[, paste0("VAR21_", 1:17)],
+processed$psq17_sum <- rowMeans(processed[, paste0("VAR21_", 1:17)],
                              na.rm = FALSE)
 ```
 
@@ -687,19 +687,7 @@ The CSI measures symptoms associated with central sensitisation. It has two part
 **Part A** (VAR22, Q16) consists of 25 symptom items rated on a 1–5 scale, shifted to 0–4 in Chapter 5. The total score `csi` ranges from 0 to 100, with higher scores indicating greater central sensitisation.
 
 ```{r}
-processed$csi <- rowSums(processed[, paste0("VAR22_", 1:25)])
-```
-
-**Part B** (VAR23, Q17) asks whether a physician has diagnosed the respondent with any of 10 conditions associated with central sensitisation. Each item is already coded 0 (No) / 1 (Yes) after the shift in Chapter 5. The items are copied to descriptively named columns.
-
-```{r}
-csi_b_names <- c("restlesslegs", "chronic_fatigue", "fibromyalgia", "TMD",
-                  "headache_migraine", "ibs", "chemical_sens", "neckpain",
-                  "anxiety", "depression")
-
-for (i in seq_along(csi_b_names)) {
-  processed[[csi_b_names[i]]] <- processed[[paste0("VAR23_", i)]]
-}
+processed$csi_sum <- rowSums(processed[, paste0("VAR22_", 1:25)])
 ```
 
 ------------------------------------------------------------------------
@@ -714,12 +702,12 @@ The HADS contains both negative items (agreeing most indicated the individual is
 
 *Sources:*
 
--   Zigmond AS, Snaith RP. The hospital anxiety and depression scale. *Acta Psychiatrica Scandinavica*, 1983;67(6):361–370.
+- Zigmond AS, Snaith RP. The hospital anxiety and depression scale. *Acta Psychiatrica Scandinavica*, 1983;67(6):361–370.
 
 **Item classification:**
 
 | VAR | Swedish question | English question | Subscale | Type | \_1 option | \_1 weight |
-|----|----|----|----|----|----|----|
+|-----------|-----------|-----------|-----------|-----------|-----------|-----------|
 | VAR25 | Jag känner mig spänd och nervös | I feel tense or 'wound up' | Anxiety | Negative | Mestadels | 3 |
 | VAR26 | Jag uppskattar fortfarande saker jag tidigare uppskattat | I still enjoy the things I used to enjoy | Depression | Positive | Definitivt lika mycket | 0 |
 | VAR27 | Jag har en känsla av att något hemskt kommer att hända | I get a sort of frightened feeling as if something awful is about to happen | Anxiety | Negative | Mycket klart och obehagligt | 3 |
@@ -752,7 +740,7 @@ score_had_P <- function(df, var) {
 
 # had_a: anxiety subscale (0–21)
 # Items: VAR25(N), VAR27(N), VAR29(N), VAR31(P), VAR33(N), VAR35(N), VAR37(N)
-processed$had_a <-
+processed$had_a_sum <-
   score_had_N(processed, "VAR25") +   # a) N – spänd och nervös
   score_had_N(processed, "VAR27") +   # c) N – känsla av att något hemskt händer
   score_had_N(processed, "VAR29") +   # e) N – bekymrar sig
@@ -763,7 +751,7 @@ processed$had_a <-
 
 # had_d: depression subscale (0–21)
 # Items: VAR26(P), VAR28(P), VAR30(P), VAR32(N), VAR34(N), VAR36(P), VAR38(P)
-processed$had_d <-
+processed$had_d_sum <-
   score_had_P(processed, "VAR26") +   # b) P – uppskattar fortfarande saker
   score_had_P(processed, "VAR28") +   # d) P – kan skratta och se det roliga
   score_had_P(processed, "VAR30") +   # f) P – på gott humör
@@ -780,15 +768,15 @@ processed$had_d <-
 The SCI-93 (Symptoms Checklist 93) measures psychological distress across 35 items (VAR39, Q20–21). Each item was rated 1–5 and shifted to 0–4 in Chapter 5. The total score ranges from 0 to 140, with higher scores indicating greater distress.
 
 ```{r}
-processed$sci93 <- rowSums(processed[, paste0("VAR39_", 1:35)])
+processed$sci93_sum <- rowSums(processed[, paste0("VAR39_", 1:35)])
 ```
 
 ### ISI (Insomnia Severity Index)
 
 The ISI total score (range 0–28) is the sum of two subscales:
 
--   **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
--   **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
+- **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
+- **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
 
 `exclusive_score()` converts any exclusively coded variable to a numeric score by multiplying each binary column by its ordinal weight (0, 1, 2, …) and summing — the same logic as `rowSums(...* 0:4)` used elsewhere, but named for readability.
 
@@ -805,7 +793,7 @@ isi_impact <-
   exclusive_score(processed, "VAR43", 5) +
   exclusive_score(processed, "VAR44", 5)
 
-processed$ISI <- isi_severity + isi_impact
+processed$ISI_sum <- isi_severity + isi_impact
 ```
 
 ------------------------------------------------------------------------
@@ -817,7 +805,7 @@ processed$ISI <- isi_severity + isi_impact
 Physical activity is captured in two separate dimensions — vigorous exercise (PE) and everyday activity (PA) — and for each dimension both time and days per week are recorded.
 
 | Variable | Question | Source | Scale |
-|----|----|----|----|
+|------------------|------------------|------------------|------------------|
 | `PE_time` | Time per week spent on vigorous exercise (e.g. running, gym) | VAR45, Q27 | 0 = none … 5 = \>120 min |
 | `PE_days` | Days per week with ≥30 min vigorous exercise | VAR46, Q28 | 0–7 days |
 | `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = \>300 min |
@@ -837,7 +825,7 @@ processed$PA_days <- rowSums(processed[, paste0("VAR48_", 1:8)] * 0:7)
 `smoke` captures current smoking status on a four level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
 
 | Variable | Question | Source | Scale |
-|----|----|----|----|
+|------------------|------------------|------------------|------------------|
 | `smoke` | Smoking status | VAR49, Q31a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
 | `ant_smoke` | Cigarettes/cigarillos per day | VAR50, Q31b | 0 = not daily; 1 = 1–9/day, 2 = 10–19/day, 3 = ≥20/day |
 
@@ -852,7 +840,7 @@ processed$ant_smoke[processed$smoke < 3] <- 0
 `snus` and `ant_snus` follow the same structure as the smoking variables. `ant_snus` records cans of snus per week and is set to 0 for respondents who do not use snus daily.
 
 | Variable | Question | Source | Scale |
-|----|----|----|----|
+|------------------|------------------|------------------|------------------|
 | `snus` | Snus use status | VAR51, Q32a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
 | `ant_snus` | Cans of snus per week | VAR52, Q32b | 0 = not daily; 1 = 1–3/week, 2 = 4–6/week, 3 = ≥7/week |
 
@@ -933,54 +921,118 @@ if (any_conflicts) {
 
 ## Chapter 8: Rename variables and apply labels
 
-Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 6 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package.
+Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 6 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package. This will also be the same on the PSQ, CSI and SCI93 questionnaires.
 
 ```{r}
 final <- processed %>%
   rename(
-    consent                    = VAR00,
-    name                       = VAR01,
-    personNumber               = VAR02,
-    mailAdress                 = VAR03,
-    sex_legal                  = VAR04,
-    gender                     = VAR05,
-    height                     = VAR06,
-    weight                     = VAR07,
-    education                  = VAR08,
-    birthCountry               = VAR09,
-    timeOnWork                 = VAR10_1,
-    timeOnSickleave            = VAR10_2,
-    timeOnStudies              = VAR10_3,
-    painOrAcheLast7Days        = VAR11,
-    painIntensityMean7Days     = VAR13,
-    painIntensityRest7Days     = VAR14,
-    painIntensityMovement7Days = VAR15,
-    painFreq12Months           = VAR16,
-    firstPainDuration          = VAR17,
-    painPersistence            = VAR18
-  ) %>%
-  rename_with(
-    ~ paste0("markedBody", str_extract(.x, "\\d+$")),
-    matches("^VAR12_\\d+$")
+    consent                                 = VAR00,
+    name                                    = VAR01,
+    personNumber                            = VAR02,
+    mailAdress                              = VAR03,
+    sexLegal                                = VAR04,
+    gender                                  = VAR05,
+    height                                  = VAR06,
+    weight                                  = VAR07,
+    education                               = VAR08,
+    birthCountry                            = VAR09,
+    timeOnWork                              = VAR10_1,
+    timeOnSickleave                         = VAR10_2,
+    timeOnStudies                           = VAR10_3,
+    painOrAcheLast7Days                     = VAR11,
+    painIntensityMean7Days                  = VAR13,
+    painIntensityRest7Days                  = VAR14,
+    painIntensityMovement7Days              = VAR15,
+    painFreq12Months                        = VAR16,
+    firstPainDuration                       = VAR17,
+    painPersistence                         = VAR18,
+    majorInterventionPast12MoMultimodalRehab  = VAR20_1,
+    majorInterventionPast12MoSpinalCordStim   = VAR20_2,
+    majorInterventionPast12MoSurgery          = VAR20_3,
+    majorInterventionPast12MoSurgeryType      = VAR20_4,
+    majorInterventionPast12MoOpioidWithdrawal = VAR20_5,
+    majorInterventionPast12MoOther            = VAR20_6,
+    majorInterventionPast12MoOtherType        = VAR20_7,
+    CSIDiagnosedByDoctorRestless            = VAR23_1,
+    CSIDiagnosedByDoctorChronicFatigue      = VAR23_2,
+    CSIDiagnosedByDoctorFibromyalgia        = VAR23_3, 
+    CSIDiagnosedByDoctorTMD                 = VAR23_4,
+    CSIDiagnosedByDoctorheadacheMigraine    = VAR23_5,
+    CSIDiagnosedByDoctorIBS                 = VAR23_6,
+    CSIDiagnosedByDoctorChemicalSens        = VAR23_7,
+    CSIDiagnosedByDoctorNeckPain            = VAR23_8,
+    CSIDiagnosedByDoctorAnxietyOrPanicAttack= VAR23_9,
+    CSIDiagnosedByDoctorDepression          = VAR23_10,
+    doctorDiagnosedArthritis                = VAR24_1,  
+    doctorDiagnosedExhaustionSyndrome       = VAR24_2,  
+    doctorDiagnosedCardiovascular           = VAR24_3,  
+    doctorDiagnosedDiabetes                 = VAR24_4,  
+    doctorDiagnosedRespiratory              = VAR24_5,
+    doctorDiagnosedSkinDisease              = VAR24_6,
+    doctorDiagnosedCancer                   = VAR24_7,
+    doctorDiagnosedPostCovid                = VAR24_8,
+    HAD1TenseOrWoundUp                      = VAR25,
+    HAD2EnjoysThingsIUsedTo                 = VAR26,
+    HAD3FrightFeelingSomethingBadWillHappen = VAR27,
+    HAD4LaughAndSeeFunnySideInThings        = VAR28,
+    HAD5WorryingThoughtsThroughMinf         = VAR29,
+    HAD6IsCheerful                          = VAR30,
+    HAD7AtEaseAndRelax                      = VAR31,
+    HAD8FeelsSlowedDown                     = VAR32,
+    HAD9FeelsButterflyStomach               = VAR33,
+    HAD10NoInterestInAppearance             = VAR34,
+    HAD11RestlessNeedToMove                 = VAR35,
+    HAD12LookForwardEnjoyment               = VAR36,
+    HAD13SuddenPanicFeeling                 = VAR37,
+    HAD14EnjoyGoodBookOrRadioOrTv           = VAR38,
+    sleep22TroubleFallingasleep             = VAR40_1,
+    sleep22TroubleStayingAsleep             = VAR40_2,
+    sleep22WakingUppTooEarly                = VAR40_3,
+    sleepScheduleSatisfaction               = VAR41,
+    badSleepAffectsDayFunction              = VAR42,
+    noticeBadSleepLifeQuality               = VAR43,
+    worriedAboutSleepProblem                = VAR44,
+    physActHowMuchTimeShortBreath           = VAR45,
+    physActAtLeast30MinShortBreath          = VAR46,
+    physActTimeOnEverydayExercise           = VAR47,
+    physActDaysSpent30MinExercise           = VAR48,
+    smoker                                  = VAR49,
+    howManyCigsPerDay                       = VAR50,
+    snuser                                  = VAR51,
+    howManySnusPacksPerWeek                 = VAR52,
+    canWeContactLater                       = VAR53,
   )
 ```
 
-Apply variable labels from VariableView to remaining columns.
+Rename the uncollapsed variables to be informative as well
 
 ```{r}
-lookup <- setNames(
-  str_replace_all(label_table$label, "\\r\\n", " "),
-  label_table$variable
-)
-matched <- intersect(names(final), names(lookup))
-var_label(final[matched]) <- lookup[matched]
-
-for (b in exclusive_bases) {
-  if (b %in% names(final)) {
-    q <- group_info$question[group_info$base == b]
-    if (length(q) == 1) var_label(final[[b]]) <- q
-  }
-}
+final <- final %>%
+  rename_with(
+    ~ paste0("markedBody", str_extract(.x, "\\d+$")),
+    matches("^VAR12_\\d+$")
+  ) %>% 
+  rename_with(
+    ~ paste0("PSQ", str_extract(.x, "\\d+$")),
+    matches("^VAR21_\\d+$")
+  ) %>%
+  rename_with(
+    ~ paste0("CSI", str_extract(.x, "\\d+$")),
+    matches("^VAR22_\\d+$")
+  ) %>%
+  rename_with(
+    ~ paste0("SCI93", str_extract(.x, "\\d+$")),
+    matches("^VAR39_\\d+$")
+  ) %>%
+  rename_with(
+    function(cols) {
+      m     <- str_match(cols, "^VAR19_(\\d+)_(\\d+)$")
+      rad   <- m[, 2]
+      falt  <- recode(m[, 3], "1" = "Name", "2" = "Dosage", "3" = "Strength")
+      paste0("painMed", falt, rad)
+    },
+    matches("^VAR19_\\d+_\\d+$")
+  )
 ```
 
 ------------------------------------------------------------------------
