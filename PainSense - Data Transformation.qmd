@@ -1,0 +1,1007 @@
+---
+title: "PainSense Data Transformation"
+author: "Kevin Matnok Hansen and Lovisa Johansson"
+format: docx
+editor: visual
+engine: knitr
+---
+
+# Purpose
+
+This document describes the data cleaning and transformation process for the PainSense baseline dataset. Raw survey data exported from Sunet Survey (Excel format) is restructured into a tidy dataset ready for statistical analysis.
+
+The pipeline is built on three principles:
+
+1.  **Classification-driven processing**: variables are grouped into *exclusive*, *non-exclusive*, and *matrix* types, with classification verified against VariableView metadata before any data is touched.
+2.  **Traceability**: each derived variable links back to its source variable and questionnaire item.
+3.  **Documented scoring**: instrument scoring rules are cited and applied consistently.
+
+------------------------------------------------------------------------
+
+## Chapter 1: Initialization
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "C:/Users/nepet/Documents/Data Management Sahlgrenska Academy")
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(rlang)
+library(labelled)
+library(openxlsx)
+```
+
+The Excel file has two sheets: **VariableView** (codebook with variable names, labels, types, and value codes) and **Data** (one row per respondent).
+
+```{r}
+filepath <- "data/Testfile.xlsx"
+vv        <- read_excel(filepath, sheet = "VariableView")
+processed <- read_excel(filepath, sheet = "Data")
+```
+
+------------------------------------------------------------------------
+
+## Chapter 2: Variable Classification
+
+Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
+
+| Class | Description | Processing |
+|----|----|----|
+| **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
+| **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
+| **matrix** | Independent sub-items with own scale | Left unchanged |
+
+Classification is based on `PainSensPROM_Baseline_DataManagement.docx` and verified against `Enkät_T1a_Gen_230102.pdf`. To reclassify a variable, move it between the three vectors below.
+
+```{r}
+exclusive <- c(
+  "VAR04",  # Q1a  juridiskt kön: Man / Kvinna
+  "VAR05",  # Q1b  könsidentitet: Man / Kvinna / Annat
+  "VAR08",  # Q4   utbildning
+  "VAR09",  # Q5   födelseland
+  "VAR11",  # Q7a  smärta senaste 7 dagar: Ja / Nej
+  "VAR13",  # Q7c  NRS medel 7d (0–10)
+  "VAR14",  # Q8   NRS vila 7d (0–10)
+  "VAR15",  # Q9   NRS rörelse 7d (0–10)
+  "VAR16",  # Q10  smärtfrekvens (5 alternativ)
+  "VAR17",  # Q11  smärtduration (5 alternativ)
+  "VAR18",  # Q12  periodisk / ihållande (2 alternativ)
+  "VAR25",  # Q19a HAD – ångest
+  "VAR26",  # Q19b HAD – depression
+  "VAR27",  # Q19c HAD – ångest
+  "VAR28",  # Q19d HAD – depression
+  "VAR29",  # Q19e HAD – ångest
+  "VAR30",  # Q19f HAD – depression
+  "VAR31",  # Q19g HAD – ångest
+  "VAR32",  # Q19h HAD – depression
+  "VAR33",  # Q19i HAD – ångest
+  "VAR34",  # Q19j HAD – depression
+  "VAR35",  # Q19k HAD – ångest
+  "VAR36",  # Q19l HAD – depression
+  "VAR37",  # Q19m HAD – ångest
+  "VAR38",  # Q19n HAD – depression
+  "VAR41",  # Q23  ISI – nöjd sömnmönster
+  "VAR42",  # Q24  ISI – funktionsförmåga
+  "VAR43",  # Q25  ISI – livskvalitet
+  "VAR44",  # Q26  ISI – bekymrad sömn
+  "VAR45",  # Q27  tid fysisk träning/vecka (6 alternativ)
+  "VAR46",  # Q28  dagar fysisk träning (0–7)
+  "VAR47",  # Q29  tid vardagsmotion/vecka (7 alternativ)
+  "VAR48",  # Q30  dagar vardagsmotion (0–7)
+  "VAR49",  # Q31a rökning (4 alternativ)
+  "VAR50",  # Q31b antal cigaretter/dag (3 alternativ)
+  "VAR51",  # Q32a snus (4 alternativ)
+  "VAR52",  # Q32b antal dosor/vecka (3 alternativ)
+  "VAR53"   # Q33  kontakt framtida studier: Ja / Nej
+)
+
+non_exclusive <- c(
+  "VAR12",  # Q7b  smärtlokalisationer (45 kroppsregioner, flera möjliga)
+  "VAR20"   # Q14  behandlingsåtgärder (flera möjliga)
+)
+
+matrix_groups <- c(
+  "VAR10",  # Q6   arbetslivssituation (25/50/75/100 % per rad)
+  "VAR19",  # Q13  smärtläkemedel (fritext per rad)
+  "VAR21",  # Q15  PSQ smärtkänslighet (0–10 per item)
+  "VAR22",  # Q16  CSI del A (1–5 per item)
+  "VAR23",  # Q17  CSI del B diagnoser (Nej/Ja per diagnos)
+  "VAR24",  # Q18  sjukdomar/skador (Ja/Nej per sjukdom)
+  "VAR39",  # Q20–21 SCI-93 (1–5 per item)
+  "VAR40"   # Q22  sömnproblem ISI (1–5 per item)
+)
+```
+
+### Build label table from VariableView
+
+```{r}
+label_table <- tibble(
+  variable  = vv[["Variable Name"]],
+  label     = vv[["Label"]],
+  type      = vv[["Type"]],
+  data_type = vv[["Data Type"]],
+  values    = vv[["Value Codes"]],
+  missing   = vv[["Missing Code"]]
+) %>%
+  mutate(base = sub("_.*", "", variable))
+```
+
+### Build group summary
+
+```{r}
+group_info <- label_table %>%
+  filter(grepl("^VAR[0-9]+_", variable)) %>%
+  group_by(base) %>%
+  summarise(
+    n_items    = n(),
+    first_type = first(type),
+    question   = sub(" - .*", "", first(label)) %>%
+                 str_replace_all("\\r\\n", " ") %>%
+                 str_trim(),
+    .groups = "drop"
+  ) %>%
+  mutate(class = case_when(
+    base %in% exclusive     ~ "exclusive",
+    base %in% non_exclusive ~ "non_exclusive",
+    base %in% matrix_groups ~ "matrix",
+    TRUE                    ~ "UNCLASSIFIED"
+  ))
+
+exclusive_bases     <- group_info$base[group_info$class == "exclusive"]
+non_exclusive_bases <- group_info$base[group_info$class == "non_exclusive"]
+
+print(as.data.frame(group_info[, c("base", "n_items", "class")]), row.names = FALSE)
+```
+
+### Build codebook
+
+Creates lookup tables mapping each numeric level to its descriptive label.
+
+```{r}
+codebook_exclusive <- label_table %>%
+  filter(base %in% exclusive_bases) %>%
+  mutate(
+    sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)),
+    option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)
+  ) %>%
+  select(base, sub_index, option_label, variable)
+
+codebook_non_exclusive <- label_table %>%
+  filter(base %in% non_exclusive_bases) %>%
+  mutate(option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)) %>%
+  select(base, variable, option_label)
+```
+
+------------------------------------------------------------------------
+
+## Chapter 3: Verification
+
+This chapter cross-checks the manual classification from Chapter 2 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early — for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
+
+`verify_classification()` takes the `group_info` table built in Chapter 2 and runs five checks:
+
+1.  **Unclassified variables** — any `VARnn` base that does not appear in `exclusive`, `non_exclusive`, or `matrix_groups`.
+2.  **Exclusive classified as Matrix in VariableView** — the Type column in VariableView says "Matrix" but the variable is in the `exclusive` vector.
+3.  **Exclusive with "Flera alternativ" in label** — the question label suggests multiple answers are allowed, which contradicts exclusive classification.
+4.  **Matrix classified as Check Boxes in VariableView** — the Type column says "Check Boxes" (i.e. non-exclusive) but the variable is in `matrix_groups`.
+5.  **Exclusive with more than 11 sub-items** — a single-select question rarely has more than 11 options; a high count may indicate a misclassification.
+
+Issues are printed to the console but do not stop the script, so all checks run regardless. The function returns the warning messages invisibly so they can be captured programmatically if needed.
+
+```{r}
+verify_classification <- function(group_info) {
+  warnings <- character(0)
+
+  uncl <- filter(group_info, class == "UNCLASSIFIED")
+  if (nrow(uncl) > 0)
+    warnings <- c(warnings, paste0(
+      "UNCLASSIFIED groups (add to one of the three vectors): ",
+      paste(uncl$base, collapse = ", ")))
+
+  matrix_as_excl <- filter(group_info, class == "exclusive",
+                            grepl("Matrix", first_type, ignore.case = TRUE))
+  if (nrow(matrix_as_excl) > 0)
+    warnings <- c(warnings, paste0(
+      "Classified as exclusive but VariableView Type is Matrix: ",
+      paste(matrix_as_excl$base, collapse = ", ")))
+
+  excl_multi <- filter(group_info, class == "exclusive",
+                       grepl("[Ff]lera alternativ", question))
+  if (nrow(excl_multi) > 0)
+    warnings <- c(warnings, paste0(
+      "Classified as exclusive but label says 'Flera alternativ': ",
+      paste(excl_multi$base, collapse = ", ")))
+
+  cb_as_matrix <- filter(group_info, class == "matrix",
+                          grepl("Check Boxes", first_type, ignore.case = TRUE))
+  if (nrow(cb_as_matrix) > 0)
+    warnings <- c(warnings, paste0(
+      "Classified as matrix but VariableView Type is Check Boxes: ",
+      paste(cb_as_matrix$base, collapse = ", ")))
+
+  many_excl <- filter(group_info, class == "exclusive", n_items > 11)
+  if (nrow(many_excl) > 0)
+    warnings <- c(warnings, paste0(
+      "Exclusive with >11 sub-items (verify single-select): ",
+      paste(many_excl$base, " (", many_excl$n_items, ")", sep = "", collapse = ", ")))
+
+  if (length(warnings) == 0) {
+    cat("Verification passed: no issues found.\n")
+  } else {
+    cat("Verification warnings:\n")
+    for (w in warnings) cat("  !", w, "\n")
+  }
+
+  invisible(warnings)
+}
+
+verify_classification(group_info)
+```
+
+------------------------------------------------------------------------
+
+## Chapter 4: Data adjustments
+
+This chapter corrects known errors tied to specific respondents, identified through manual data review. Each correction is tied to a specific ID and a documented reason. This chapter changes with each new wave of data review — if a new error is found, a new line is added here.
+
+It does not handle general format or encoding uncertainties (such as ambiguous date formats); those are addressed defensively in Chapter 6 at the point where each variable is actually used.
+
+### Data entry errors
+
+Known errors identified during data quality review, corrected by respondent ID. Values are set to their intended values in the raw 1/2 coding used by Sunet Survey.
+
+```{r}
+# VAR07: weight 995 kg → 95 kg (data entry error, ID 7)
+processed$VAR07[processed$ID == 7] <- 95
+
+# VAR15_8: value 21 → 2 (Nej, data entry error, ID 2005)
+processed$VAR15_8[processed$ID == 2005] <- 2
+```
+
+### Sex imputation from personnummer
+
+VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for men and even for women.
+
+`pnr` is stored as a vector here and reused in Chapter 6 to derive birth year.
+
+Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 5 recodes 2 → 0. Assigning 1 here means "this option was selected".
+
+```{r}
+pnr       <- trimws(as.character(processed$VAR02))
+sex_digit <- as.integer(substr(pnr, nchar(pnr) - 1, nchar(pnr) - 1))
+is_woman  <- sex_digit %% 2 == 0
+
+sex_missing <- (processed$VAR04_1 != 1 & processed$VAR04_2 != 1) |
+               (is.na(processed$VAR04_1) & is.na(processed$VAR04_2))
+if (any(sex_missing, na.rm = TRUE)) {
+  processed$VAR04_1[sex_missing] <- if_else(is_woman[sex_missing], 2, 1)
+  processed$VAR04_2[sex_missing] <- if_else(is_woman[sex_missing], 1, 2)
+}
+```
+
+------------------------------------------------------------------------
+
+## Chapter 5: Standardization of values
+
+All variables are standardized before any derived variables are created in Chapter 6.
+
+Two transformations are applied depending on variable type:
+
+-   **Recode** (`recode_vars`): binary exclusive variables are raw-coded **1 = Ja, 2 = Nej** by Sunet Survey. These are recoded to **1 = yes, 0 = no** so that 1 consistently means "selected".
+-   **Shift** (`shift_vars`): matrix variables use a **1–5** scale in the raw data. These are shifted to **0–4** so that 0 means "not at all" rather than 1.
+
+In both cases, the missing code **999** is first replaced with NA.
+
+The prefixes in `recode_vars` and `shift_vars` include a trailing underscore (e.g. `"VAR11_"`) so that `starts_with()` matches `VAR11_1`, `VAR11_2` etc. but not `VAR110_1` or `VAR112_3`. Without the underscore, a prefix like `"VAR11"` would incorrectly match unrelated variables.
+
+```{r}
+recode_vars <- c(
+  "VAR04_", "VAR05_", "VAR08_", "VAR09_",
+  paste0("VAR", 11:18, "_"), "VAR20_",
+  paste0("VAR", 24:38, "_"),
+  paste0("VAR", 41:52, "_")
+)
+
+shift_vars <- c("VAR10_", "VAR22_", "VAR23_", "VAR39_", "VAR40_")
+
+processed <- processed %>%
+  mutate(
+    across(starts_with(recode_vars), ~ replace(.x, .x == 999, NA_real_)),
+    across(starts_with(shift_vars),  ~ replace(.x, .x == 999, NA_real_)),
+    across(starts_with(recode_vars), ~ replace(.x, .x == 2,   0)),
+    across(starts_with(shift_vars),  ~ .x - 1)
+  )
+```
+
+------------------------------------------------------------------------
+
+## Chapter 6: Formation of new variables
+
+This chapter derives all variables ready for analysis from the standardized data. Unlike Chapter 4, corrections here are not tied to specific respondents — they reflect general defensive handling of format and encoding uncertainties that could arise in any data export (e.g. ambiguous date formats, missing values that carry a substantive meaning).
+
+### Age and birthyear
+
+Birthyear is extracted from personnummer. Swedish personal numbers can be 10 or 12 digits. Assuming no one is born before 1915: for 10-digit numbers, YY ≥ 15 → 19YY, else → 20YY.
+
+`Svarstillfälle` (survey date) is parsed with `lubridate::parse_date_time()` to handle both `yyyy-mm-dd` and `dd-mm-yyyy` formats, which may differ between export tools and operating system locale settings.
+
+```{r}
+resp_year <- as.integer(format(
+  lubridate::parse_date_time(processed$Svarstillfälle, orders = c("ymd", "dmy")),
+  "%Y"
+))
+
+yy <- as.integer(substr(pnr, 1, 2))
+processed$birthyear <- case_when(
+  nchar(pnr) == 12  ~ as.integer(substr(pnr, 1, 4)),
+  yy >= 15L         ~ 1900L + yy,
+  TRUE              ~ 2000L + yy
+)
+
+processed$age <- resp_year - processed$birthyear
+```
+
+### Sex and gender identity
+
+VAR04 (legal sex) and VAR05 (gender identity) are exclusively coded binary variables. They are collapsed to single numeric columns in Chapter 7 and given descriptive names in Chapter 8. No derived variables are created here.
+
+### Body Mass Index
+
+BMI is calculated from height (VAR06, cm) and weight (VAR07, kg) using the standard formula weight / (height / 100)². The `if_else` guard excludes respondents with missing or zero height to avoid division errors.
+
+Two categorical versions are derived following WHO classification (Weir & Jan, *StatPearls*, 2023): a four-category version (`BMI_4cat`) for general use and a six-category version (`BMI_6cat`) for analyses requiring finer obesity stratification.
+
+```{r}
+processed <- processed %>%
+  mutate(
+    BMI = if_else(!is.na(VAR06) & VAR06 > 0 & !is.na(VAR07),
+                  VAR07 / (VAR06 / 100)^2, NA_real_),
+
+    BMI_4cat = case_when(
+      BMI <  18.5             ~ 0,  # underweight
+      BMI >= 18.5 & BMI < 25 ~ 1,   # normal
+      BMI >= 25   & BMI < 30 ~ 2,   # overweight
+      BMI >= 30               ~ 3,  # obese
+      TRUE                    ~ NA_real_
+    ),
+
+    BMI_6cat = case_when(
+      BMI <  18.5             ~ 0,  # underweight
+      BMI >= 18.5 & BMI < 25 ~ 1,  # normal
+      BMI >= 25   & BMI < 30 ~ 2,  # overweight
+      BMI >= 30   & BMI < 35 ~ 3,  # obese I
+      BMI >= 35   & BMI < 40 ~ 4,  # obese II
+      BMI >= 40               ~ 5,  # obese III
+      TRUE                    ~ NA_real_
+    )
+  )
+```
+
+### Education and origin
+
+`edu_BIN` dichotomises education for Rasch analysis: 0 = non-university (grundskola, gymnasium), 1 = university or higher education. It is taken directly from VAR08_3, which is already 0/1 after Chapter 5 recoding. The full education variable (VAR08) is collapsed and renamed in Chapters 7 and 8.
+
+`origin` encodes birth country as an ordinal variable by combining three binary columns with weights: VAR09_2 (other Nordic) × 1, VAR09_3 (European non-Nordic) × 2, VAR09_4 (outside Europe) × 3. Respondents born in Sweden (VAR09_1) are the reference category and receive 0.
+
+```{r}
+processed$edu_BIN <- processed$VAR08_3
+
+processed$origin <- processed$VAR09_2 + 2 * processed$VAR09_3 + 3 * processed$VAR09_4
+```
+
+### Employment and pensioner
+
+VAR10_1–3 record percentage of time spent in work, sick leave, and studies respectively. Missing values are treated as 0% on the assumption that respondents who left a field blank reported no activity in that category.
+
+`pensioner65` is 1 for respondents aged 65 or older who reported 0% across all three activity types, since this combination most likely reflects retirement rather than missing data.
+
+```{r}
+processed <- processed %>%
+  mutate(
+    VAR10_1 = if_else(is.na(VAR10_1), 0, as.numeric(VAR10_1)),
+    VAR10_2 = if_else(is.na(VAR10_2), 0, as.numeric(VAR10_2)),
+    VAR10_3 = if_else(is.na(VAR10_3), 0, as.numeric(VAR10_3)),
+    pensioner65 = if_else(age >= 65 & VAR10_1 == 0 & VAR10_2 == 0 & VAR10_3 == 0, 1, 0)
+  )
+```
+
+------------------------------------------------------------------------
+
+### Pain variables
+
+This section derives core pain variables from the raw survey data. The variables fall into four conceptual groups: *presence of pain*, *chronicity*, *pain character*, and *pain intensity*. Together they form the foundation for most downstream analyses in this document.
+
+**Derived variables overview**
+
+| Variable | Source | Scale | Interpretation |
+|----|----|----|----|
+| `pain7days` | VAR11_1 | 0/1 | 1 = pain in the past 7 days |
+| `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<1 month, …, 4 = ≥2 years |
+| `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 3 months |
+| `persistent` | VAR18_2 | 0/1 | 0 = periodic, 1 = persistent |
+| `pain_freq` | VAR16_1–5 | 0–4 | 0 = seldom, 4 = every day |
+| `nrs_mean7d` | VAR13_1–11 | 0–10 | Mean pain intensity past 7 days (NRS) |
+| `nrs_rest7d` | VAR14_1–11 | 0–10 | Pain at rest past 7 days (NRS) |
+| `nrs_move7d` | VAR15_1–11 | 0–10 | Pain during movement past 7 days (NRS) |
+
+#### Presence of pain
+
+`pain7days` is the gating variable for most pain-related variables: respondents who report no pain in the past 7 days are not asked about intensity, duration, or location.
+
+```{r}
+processed$pain7days <- processed$VAR11_1  # 1 = yes, 0 = no
+```
+
+#### Chronicity
+
+`pain_duration` converts the exclusively coded VAR17 columns into a 0–4 ordinal score using the `rowSums(...* 0:4)` pattern. VAR17_1 corresponds to the shortest duration category and VAR17_5 to the longest, so the ascending weight vector `0:4` preserves the natural ordering: higher scores indicate longer pain history.
+
+| Score | Raw column | Response option                 |
+|-------|------------|---------------------------------|
+| 0     | VAR17_1    | Less than 1 month               |
+| 1     | VAR17_2    | 1 month to less than 3 months   |
+| 2     | VAR17_3    | 3 months to less than 12 months |
+| 3     | VAR17_4    | 12 months to less than 2 years  |
+| 4     | VAR17_5    | 2 years or more                 |
+
+`chronic_pain` is 1 if the respondent has current pain (`pain7days == 1`) and reports pain duration of at least 3 months (score ≥ 2, i.e. VAR17_3 or higher). Respondents who did not answer VAR11 are set to NA rather than 0.
+
+```{r}
+processed$pain_duration <- rowSums(processed[, paste0("VAR17_", 1:5)] * 0:4)
+
+processed$chronic_pain <- case_when(
+  is.na(processed$pain7days)                                    ~ NA_real_,
+  processed$pain7days == 1 & processed$pain_duration >= 2      ~ 1,
+  TRUE                                                          ~ 0
+)
+```
+
+#### Pain character
+
+`persistent` distinguishes periodic from persistent pain. `pain_freq` summarises how often the respondent experiences pain on a 0–4 scale where higher values indicate higher frequency. VAR16 is reverse-coded in the raw data: VAR16_1 corresponds to the most frequent option ("every day") and VAR16_5 to the least frequent ("seldom"). Multiplying by the descending weight vector `4:0` reverses this so that the derived variable is intuitive: 4 = every day, 0 = seldom.
+
+| Score | Raw column | Response option                           |
+|-------|------------|-------------------------------------------|
+| 4     | VAR16_1    | Every day                                 |
+| 3     | VAR16_2    | A couple of days per week                 |
+| 2     | VAR16_3    | One day per week                          |
+| 1     | VAR16_4    | A couple of days per month                |
+| 0     | VAR16_5    | Seldom / not at all in the past 12 months |
+
+```{r}
+processed$persistent <- processed$VAR18_2  # 0 = periodisk, 1 = ihållande
+
+processed$pain_freq <- rowSums(processed[, paste0("VAR16_", 1:5)] * 4:0)
+```
+
+#### Pain intensity (NRS)
+
+Three NRS (Numeric Rating Scale, 0–10) variables capture different aspects of pain intensity over the past 7 days. Each is encoded as 11 exclusive columns (VAR_1 = score 0, VAR_11 = score 10), converted to a numeric value with `rowSums(...* 0:10)`.
+
+```{r}
+processed$nrs_mean7d <- rowSums(processed[, paste0("VAR13_", 1:11)] * 0:10)
+processed$nrs_rest7d <- rowSums(processed[, paste0("VAR14_", 1:11)] * 0:10)
+processed$nrs_move7d <- rowSums(processed[, paste0("VAR15_", 1:11)] * 0:10)
+```
+
+### Number of pain sites
+
+```{r}
+processed$nr_sites <- if_else(
+  processed$pain7days == 1,
+  rowSums(processed[, paste0("VAR12_", 1:45)], na.rm = FALSE),
+  NA_real_
+)
+```
+
+### Widespread pain — ACR90
+
+The 1990 American College of Rheumatology (ACR) criteria classify pain as widespread when three conditions are simultaneously met: pain is present on both the left and right side of the body, pain is present both above and below the waist, and pain is present in the axial skeleton.
+
+**Body region groups**
+
+The 45 pain locations (VAR12) are grouped into five regions:
+
+| Region            | Description      |
+|-------------------|------------------|
+| upper_right_acr90 | Right upper body |
+| upper_left_acr90  | Left upper body  |
+| lower_right_acr90 | Right lower body |
+| lower_left_acr90  | Left lower body  |
+| axial_acr90       | Axial skeleton   |
+
+**Classification**
+
+A respondent is classified as having widespread pain (ACR90 = 1) if pain is reported in the axial region (q5) and in at least one contralateral upper and lower body combination. The first valid pattern requires pain in the right upper body (q1) and the left lower body (q4). The second valid pattern requires pain in the left upper body (q2) and the right lower body (q3). Either pattern satisfies the requirement for pain on both sides of the body and both above and below the waist.
+
+ChronicP_ACR90 is set to 1 when a respondent meets both the ACR90 criterion and the chronic pain criterion.
+
+```{r}
+acr90_regions <- list(
+  upper_right_acr90 = c("VAR12_5","VAR12_7","VAR12_9","VAR12_11","VAR12_26","VAR12_28","VAR12_30","VAR12_32"),
+  upper_left_acr90  = c("VAR12_4","VAR12_6","VAR12_8","VAR12_10","VAR12_27","VAR12_29","VAR12_31","VAR12_33"),
+  lower_right_acr90 = c("VAR12_18","VAR12_20","VAR12_22","VAR12_38","VAR12_40","VAR12_42","VAR12_44"),
+  lower_left_acr90  = c("VAR12_17","VAR12_19","VAR12_21","VAR12_39","VAR12_41","VAR12_43","VAR12_45"),
+  axial_acr90       = c("VAR12_3","VAR12_12","VAR12_13","VAR12_25","VAR12_34","VAR12_35","VAR12_36","VAR12_37")
+)
+
+processed <- processed %>%
+  bind_cols(map_dfc(acr90_regions, ~ rowSums(processed[, .x]))) %>%
+  mutate(
+    contralat_1    = as.integer(axial_acr90 > 0 & lower_left_acr90  > 0 & upper_right_acr90 > 0),
+    contralat_2    = as.integer(axial_acr90 > 0 & lower_right_acr90 > 0 & upper_left_acr90  > 0),
+    ACR90          = as.integer(contralat_1 == 1 | contralat_2 == 1),
+    ChronicP_ACR90 = as.integer(chronic_pain == 1 & ACR90 == 1)
+  )
+```
+
+### Widespread pain — WP2019
+
+Widespread pain according to the 2019 classification is determined by two complementary measures: the Widespread Pain Index (WPI) and the number of affected body regions.
+
+**Body regions**
+
+The 45 pain locations (VAR12) are assigned to five body regions. A region is considered affected if at least one location within it is marked.
+
+| Region             | Description      |
+|--------------------|------------------|
+| upper_right_wp2019 | Right upper body |
+| upper_left_wp2019  | Left upper body  |
+| lower_right_wp2019 | Right lower body |
+| lower_left_wp2019  | Left lower body  |
+| axial_wp2019       | Axial skeleton   |
+
+**Derived variables overview**
+
+| Variable | Description | Scale |
+|----|----|----|
+| `upper_right_wp2019` … `axial_wp2019` | Region affected (≥1 site marked) | 0/1 |
+| `nr_regions_wp2019` | Number of affected regions (0–5) | 0–5 |
+| `WPI_AGE` | Widespread Pain Index | 0–19 |
+| `WP2019_AGE` | Widespread pain by WP2019 criteria | 0/1 |
+| `CP_WP2019_AGE` | Chronic widespread pain (WP2019) | 0/1 |
+| `Pain3cat_CWSP2019` | Pain category: 0 = none, 1 = chronic non-widespread, 2 = chronic widespread | 0–2 |
+
+#### Body region sums
+
+Each region is coded 1 if at least one of its pain locations is marked, 0 otherwise. The same `named list + map_dfc` pattern as ACR90 is used, but with a `> 0` threshold instead of a raw sum.
+
+```{r}
+wp2019_regions <- list(
+  upper_right_wp2019 = c("VAR12_2","VAR12_23","VAR12_5","VAR12_26","VAR12_7","VAR12_28","VAR12_9","VAR12_11","VAR12_30","VAR12_32"),
+  upper_left_wp2019  = c("VAR12_1","VAR12_24","VAR12_4","VAR12_27","VAR12_6","VAR12_29","VAR12_8","VAR12_10","VAR12_31","VAR12_33"),
+  lower_right_wp2019 = c("VAR12_18","VAR12_38","VAR12_40","VAR12_20","VAR12_22","VAR12_42","VAR12_44"),
+  lower_left_wp2019  = c("VAR12_17","VAR12_39","VAR12_41","VAR12_19","VAR12_21","VAR12_43","VAR12_45"),
+  axial_wp2019       = c("VAR12_3","VAR12_25","VAR12_34","VAR12_35","VAR12_36","VAR12_37","VAR12_12","VAR12_13","VAR12_14","VAR12_15")
+)
+
+processed <- processed %>%
+  bind_cols(map_dfc(wp2019_regions, ~ as.integer(rowSums(processed[, .x]) > 0)))
+```
+
+#### Widespread Pain Index (WPI_AGE)
+
+The WPI counts 19 bilateral anatomical areas. Each area scores 1 if pain is reported on either or both sides, giving a maximum of 19. `calc_wpi()` iterates over the 19 area definitions and returns a row-wise sum.
+
+Respondents who did not answer VAR11 (pain presence) are set to NA. Those who reported no pain are assigned WPI = 0 rather than NA, since a score of 0 is substantively meaningful for this group.
+
+```{r}
+calc_wpi <- function(df) {
+  areas <- list(
+    c("VAR12_2",  "VAR12_23"),
+    c("VAR12_5",  "VAR12_26"),
+    c("VAR12_7",  "VAR12_28"),
+    c("VAR12_9",  "VAR12_11", "VAR12_30", "VAR12_32"),
+    c("VAR12_1",  "VAR12_24"),
+    c("VAR12_4",  "VAR12_27"),
+    c("VAR12_6",  "VAR12_29"),
+    c("VAR12_8",  "VAR12_10", "VAR12_31", "VAR12_33"),
+    c("VAR12_18", "VAR12_38"),
+    c("VAR12_18", "VAR12_40"),
+    c("VAR12_20", "VAR12_22", "VAR12_42", "VAR12_44"),
+    c("VAR12_17", "VAR12_39"),
+    c("VAR12_17", "VAR12_41"),
+    c("VAR12_19", "VAR12_21", "VAR12_43", "VAR12_45"),
+    c("VAR12_3",  "VAR12_25"),
+    c("VAR12_34", "VAR12_35"),
+    c("VAR12_36", "VAR12_37"),
+    c("VAR12_12", "VAR12_13"),
+    c("VAR12_14", "VAR12_15")
+  )
+
+  map(areas, ~ as.integer(rowSums(df[, .x, drop = FALSE], na.rm = FALSE) > 0)) %>%
+    bind_cols() %>%
+    rowSums()
+}
+
+processed$WPI_AGE <- calc_wpi(processed)
+
+processed <- processed %>%
+  mutate(
+    WPI_AGE = case_when(
+      is.na(pain7days) ~ NA_real_,
+      pain7days == 0   ~ 0,
+      TRUE             ~ WPI_AGE
+    )
+  )
+```
+
+#### Classification
+
+A respondent is classified as having widespread pain (`WP2019_AGE = 1`) if the WPI exceeds 6 and pain is present in more than 3 of the 5 body regions. `Pain3cat_CWSP2019` provides a three-level summary combining chronicity and widespread pain.
+
+```{r}
+processed <- processed %>%
+  mutate(
+    nr_regions_wp2019 = upper_right_wp2019 + upper_left_wp2019 + lower_right_wp2019 +
+                        lower_left_wp2019  + axial_wp2019,
+    WP2019_AGE        = as.integer(WPI_AGE > 6 & nr_regions_wp2019 > 3),
+    CP_WP2019_AGE     = as.integer(chronic_pain == 1 & WP2019_AGE == 1),
+    Pain3cat_CWSP2019 = case_when(
+      chronic_pain == 1 & CP_WP2019_AGE == 1 ~ 2,  # chronic widespread pain
+      chronic_pain == 1                       ~ 1,  # chronic non-widespread pain
+      TRUE                                    ~ 0   # no chronic pain
+    )
+  )
+```
+
+### Treatments (VAR20)
+
+Q14 asks whether the respondent has undergone any major pain treatment in the past 12 months. The question is non-exclusive so multiple options can be marked. NA is treated as 0 (treatment not reported).
+
+VAR20_4 and VAR20_7 are free-text follow-up fields ("type of surgery" and "type of other treatment") and are not included here.
+
+```{r}
+processed <- processed %>%
+  mutate(
+    trt_mmr       = replace_na(VAR20_1, 0), # multimodal pain rehabilitation
+    trt_neurostim = replace_na(VAR20_2, 0), # spinal cord stimulation
+    trt_surgery   = replace_na(VAR20_3, 0), # surgical procedure
+    trt_opioid    = replace_na(VAR20_5, 0), # opioid withdrawal programme
+    trt_other     = replace_na(VAR20_6, 0)  # other major treatment
+  )
+```
+
+### PSQ (Pain Sensitivity Questionnaire)
+
+The PSQ measures generalised pain sensitivity using hypothetical pain scenarios rated 0–10. Two versions are scored:
+
+-   **PSQ-17**: all 17 items (VAR21_1–17), mean range 0–10.
+-   **PSQ-14**: 14 items, excluding items 5, 9, and 13 (VAR21_5, VAR21_9, VAR21_13). These three items describe thermal pain stimuli and are omitted in the PSQ-14 version to reduce thermal bias, mean range 0–10.
+
+Both scores use `rowMeans` with `na.rm = FALSE` so that any respondent with missing items receives NA rather than a score based on a partial set of items.
+
+```{r}
+processed$psq14 <- rowMeans(processed[, paste0("VAR21_", c(1:4, 6:8, 10:12, 14:17))],
+                             na.rm = FALSE)
+
+processed$psq17 <- rowMeans(processed[, paste0("VAR21_", 1:17)],
+                             na.rm = FALSE)
+```
+
+### CSI (Central Sensitization Inventory)
+
+The CSI measures symptoms associated with central sensitisation. It has two parts.
+
+**Part A** (VAR22, Q16) consists of 25 symptom items rated on a 1–5 scale, shifted to 0–4 in Chapter 5. The total score `csi` ranges from 0 to 100, with higher scores indicating greater central sensitisation.
+
+```{r}
+processed$csi <- rowSums(processed[, paste0("VAR22_", 1:25)])
+```
+
+**Part B** (VAR23, Q17) asks whether a physician has diagnosed the respondent with any of 10 conditions associated with central sensitisation. Each item is already coded 0 (No) / 1 (Yes) after the shift in Chapter 5. The items are copied to descriptively named columns.
+
+```{r}
+csi_b_names <- c("restlesslegs", "chronic_fatigue", "fibromyalgia", "TMD",
+                  "headache_migraine", "ibs", "chemical_sens", "neckpain",
+                  "anxiety", "depression")
+
+for (i in seq_along(csi_b_names)) {
+  processed[[csi_b_names[i]]] <- processed[[paste0("VAR23_", i)]]
+}
+```
+
+------------------------------------------------------------------------
+
+### HAD (Hospital Anxiety and Depression Scale)
+
+The HADS consists of 14 items: 7 for anxiety (odd questions, VAR25–VAR37) and 7 for depression (even questions, VAR26–VAR38). Each item is scored 0–3; subscale range 0–21. Higher scores indicate greater distress.
+
+**Scoring of positive vs. negative items**
+
+The HADS contains both negative items (agreeing most indicated the individual is much depressed or have much anxiety) where the most distressing response is the first option, and positive items (agreeing most is an indication of low degree of depression or anxiety) where the healthiest response is the first option. To ensure that all items contribute in the same direction (higher = more distress), positive items are reverse scored.
+
+*Sources:*
+
+-   Zigmond AS, Snaith RP. The hospital anxiety and depression scale. *Acta Psychiatrica Scandinavica*, 1983;67(6):361–370.
+
+**Item classification:**
+
+| VAR | Swedish question | English question | Subscale | Type | \_1 option | \_1 weight |
+|----|----|----|----|----|----|----|
+| VAR25 | Jag känner mig spänd och nervös | I feel tense or 'wound up' | Anxiety | Negative | Mestadels | 3 |
+| VAR26 | Jag uppskattar fortfarande saker jag tidigare uppskattat | I still enjoy the things I used to enjoy | Depression | Positive | Definitivt lika mycket | 0 |
+| VAR27 | Jag har en känsla av att något hemskt kommer att hända | I get a sort of frightened feeling as if something awful is about to happen | Anxiety | Negative | Mycket klart och obehagligt | 3 |
+| VAR28 | Jag kan skratta och se det roliga i saker och ting | I can laugh and see the funny side of things | Depression | Positive | Lika ofta som tidigare | 0 |
+| VAR29 | Jag bekymrar mig över saker | Worrying thoughts go through my mind | Anxiety | Negative | Mestadels | 3 |
+| VAR30 | Jag känner mig på gott humör | I feel cheerful | Depression | Positive | Mestadels | 0 |
+| VAR31 | Jag kan sitta stilla och känna mig avslappnad | I can sit at ease and feel relaxed | Anxiety | Positive | Absolut | 0 |
+| VAR32 | Allting känns trögt | I feel as if I am slowed down | Depression | Negative | Nästan alltid | 3 |
+| VAR33 | Jag känner mig orolig, som om jag hade fjärilar i magen | I get a sort of frightened feeling like 'butterflies' in the stomach | Anxiety | Negative | Väldigt ofta | 3 |
+| VAR34 | Jag har tappat intresset för hur jag ser ut | I have lost interest in my appearance | Depression | Negative | Fullständigt | 3 |
+| VAR35 | Jag känner mig rastlös | I feel restless as if I have to be on the move | Anxiety | Negative | Väldigt ofta | 3 |
+| VAR36 | Jag ser med glädje fram emot saker och ting | I look forward with enjoyment to things | Depression | Positive | Lika mycket som tidigare | 0 |
+| VAR37 | Jag får plötsliga panikkänslor | I get sudden feelings of panic | Anxiety | Negative | Väldigt ofta | 3 |
+| VAR38 | Jag kan uppskatta en god bok, ett TV- eller radioprogram | I can enjoy a good book or radio or TV programme | Depression | Positive | Ofta | 0 |
+
+`score_had_N()` and `score_had_P()` are helper functions that score one HAD item given a dataframe and a base variable name. Both assign weights 3, 2, 1, 0 to the four response options — `score_had_N` in that order (first option = most distress), and `score_had_P` in reverse order (first option = least distress).
+
+```{r}
+score_had_N <- function(df, var) {
+  3 * df[[paste0(var, "_1")]] +
+  2 * df[[paste0(var, "_2")]] +
+  1 * df[[paste0(var, "_3")]]
+}
+
+score_had_P <- function(df, var) {
+  1 * df[[paste0(var, "_2")]] +
+  2 * df[[paste0(var, "_3")]] +
+  3 * df[[paste0(var, "_4")]]
+}
+
+# had_a: anxiety subscale (0–21)
+# Items: VAR25(N), VAR27(N), VAR29(N), VAR31(P), VAR33(N), VAR35(N), VAR37(N)
+processed$had_a <-
+  score_had_N(processed, "VAR25") +   # a) N – spänd och nervös
+  score_had_N(processed, "VAR27") +   # c) N – känsla av att något hemskt händer
+  score_had_N(processed, "VAR29") +   # e) N – bekymrar sig
+  score_had_P(processed, "VAR31") +   # g) P – kan sitta stilla och slappna av
+  score_had_N(processed, "VAR33") +   # i) N – fjärilar i magen
+  score_had_N(processed, "VAR35") +   # k) N – rastlös
+  score_had_N(processed, "VAR37")     # m) N – panikkänslor
+
+# had_d: depression subscale (0–21)
+# Items: VAR26(P), VAR28(P), VAR30(P), VAR32(N), VAR34(N), VAR36(P), VAR38(P)
+processed$had_d <-
+  score_had_P(processed, "VAR26") +   # b) P – uppskattar fortfarande saker
+  score_had_P(processed, "VAR28") +   # d) P – kan skratta och se det roliga
+  score_had_P(processed, "VAR30") +   # f) P – på gott humör
+  score_had_N(processed, "VAR32") +   # h) N – allting känns tungt
+  score_had_N(processed, "VAR34") +   # j) N – tappat intresset för utseende
+  score_had_P(processed, "VAR36") +   # l) P – ser med glädje framemot saker
+  score_had_P(processed, "VAR38")     # n) P – kan uppskatta bok/TV/radio
+```
+
+------------------------------------------------------------------------
+
+### SCI-93
+
+The SCI-93 (Symptoms Checklist 93) measures psychological distress across 35 items (VAR39, Q20–21). Each item was rated 1–5 and shifted to 0–4 in Chapter 5. The total score ranges from 0 to 140, with higher scores indicating greater distress.
+
+```{r}
+processed$sci93 <- rowSums(processed[, paste0("VAR39_", 1:35)])
+```
+
+### ISI (Insomnia Severity Index)
+
+The ISI total score (range 0–28) is the sum of two subscales:
+
+-   **Severity** (VAR40_1–3): sleep onset, sleep maintenance, and early waking. Each item has already been shifted to a 0–4 scale. Subscale range 0–12.
+-   **Impact** (VAR41–44): satisfaction with sleep, interference with daily functioning, noticeability to others, and distress. Each item is stored as 5 exclusive binary columns and converted to a 0–4 score. Subscale range 0–16.
+
+`exclusive_score()` converts any exclusively coded variable to a numeric score by multiplying each binary column by its ordinal weight (0, 1, 2, …) and summing — the same logic as `rowSums(...* 0:4)` used elsewhere, but named for readability.
+
+```{r}
+exclusive_score <- function(df, var, n) {
+  rowSums(df[, paste0(var, "_", 1:n)] * seq(0, n - 1))
+}
+
+isi_severity <- rowSums(processed[, paste0("VAR40_", 1:3)])
+
+isi_impact <-
+  exclusive_score(processed, "VAR41", 5) +
+  exclusive_score(processed, "VAR42", 5) +
+  exclusive_score(processed, "VAR43", 5) +
+  exclusive_score(processed, "VAR44", 5)
+
+processed$ISI <- isi_severity + isi_impact
+```
+
+------------------------------------------------------------------------
+
+### Lifestyle
+
+#### Physical activity
+
+Physical activity is captured in two separate dimensions — vigorous exercise (PE) and everyday activity (PA) — and for each dimension both time and days per week are recorded.
+
+| Variable | Question | Source | Scale |
+|----|----|----|----|
+| `PE_time` | Time per week spent on vigorous exercise (e.g. running, gym) | VAR45, Q27 | 0 = none … 5 = \>120 min |
+| `PE_days` | Days per week with ≥30 min vigorous exercise | VAR46, Q28 | 0–7 days |
+| `PA_time` | Time per week spent on everyday activity (e.g. walking, cycling) | VAR47, Q29 | 0 = none … 6 = \>300 min |
+| `PA_days` | Days per week with ≥30 min everyday activity | VAR48, Q30 | 0–7 days |
+
+All four variables are exclusively coded and converted to ordinal scores using `rowSums * weights`.
+
+```{r}
+processed$PE_time <- rowSums(processed[, paste0("VAR45_", 1:6)] * 0:5)
+processed$PE_days <- rowSums(processed[, paste0("VAR46_", 1:8)] * 0:7)
+processed$PA_time <- rowSums(processed[, paste0("VAR47_", 1:7)] * 0:6)
+processed$PA_days <- rowSums(processed[, paste0("VAR48_", 1:8)] * 0:7)
+```
+
+#### Smoking
+
+`smoke` captures current smoking status on a four level ordinal scale. `ant_smoke` records cigarettes or cigarillos smoked per day, but is only meaningful for daily smokers — respondents with `smoke < 3` are assigned 0.
+
+| Variable | Question | Source | Scale |
+|----|----|----|----|
+| `smoke` | Smoking status | VAR49, Q31a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
+| `ant_smoke` | Cigarettes/cigarillos per day | VAR50, Q31b | 0 = not daily; 1 = 1–9/day, 2 = 10–19/day, 3 = ≥20/day |
+
+```{r}
+processed$smoke     <- rowSums(processed[, paste0("VAR49_", 1:4)] * 0:3)
+processed$ant_smoke <- rowSums(processed[, paste0("VAR50_", 1:3)] * 1:3)
+processed$ant_smoke[processed$smoke < 3] <- 0
+```
+
+#### Snus
+
+`snus` and `ant_snus` follow the same structure as the smoking variables. `ant_snus` records cans of snus per week and is set to 0 for respondents who do not use snus daily.
+
+| Variable | Question | Source | Scale |
+|----|----|----|----|
+| `snus` | Snus use status | VAR51, Q32a | 0 = never/quit \>6 m, 1 = quit \<6 m, 2 = occasional, 3 = daily |
+| `ant_snus` | Cans of snus per week | VAR52, Q32b | 0 = not daily; 1 = 1–3/week, 2 = 4–6/week, 3 = ≥7/week |
+
+```{r}
+processed$snus     <- rowSums(processed[, paste0("VAR51_", 1:4)] * 0:3)
+processed$ant_snus <- rowSums(processed[, paste0("VAR52_", 1:3)] * 1:3)
+processed$ant_snus[processed$snus < 3] <- 0
+```
+
+------------------------------------------------------------------------
+
+## Chapter 7: Collapsing exclusive dummies
+
+Collapses mutually exclusive dummy columns (e.g., VAR04_1, VAR04_2) into a single 0-based categorical column (e.g., VAR04 = 0 or 1). Conflicts, where more than one option is marked, are flagged as **-1** rather than silently dropped as NA, making data errors visible and traceable.
+
+```{r}
+collapse_dummies <- function(df, prefix) {
+  cols <- grep(paste0("^", prefix, "_"), names(df), value = TRUE)
+  cols <- cols[order(as.numeric(sub(paste0(prefix, "_"), "", cols)))]
+
+  result <- apply(df[cols], 1, function(row) {
+    hit <- which(row == 1)
+    if (length(hit) == 1) return(hit - 1)   # 0-based
+    if (length(hit) == 0) return(NA)         # unanswered
+    return(-1)                               # conflict: multiple options marked
+  })
+
+  df[[cols[1]]] <- result
+  names(df)[names(df) == cols[1]] <- prefix
+  df[cols[-1]] <- NULL
+  df
+}
+```
+
+All exclusively coded variable groups listed below are collapsed. The resulting single column contains the 0-based index of the selected option, which can be used for descriptive purposes. HAD variables (VAR25–38) are also included here; their collapsed values (0–3) represent the selected response option, while the scored subscales `had_a` and `had_d` from Chapter 6 are used for analysis.
+
+```{r}
+variables_to_collapse <- c(
+  "VAR04", "VAR05",
+  "VAR08", "VAR09",
+  "VAR11", "VAR13", "VAR14", "VAR15",
+  "VAR16", "VAR17", "VAR18",
+  "VAR25", "VAR26", "VAR27", "VAR28", "VAR29", "VAR30", "VAR31",
+  "VAR32", "VAR33", "VAR34", "VAR35", "VAR36", "VAR37", "VAR38",
+  "VAR41", "VAR42", "VAR43", "VAR44",
+  "VAR45", "VAR46", "VAR47", "VAR48",
+  "VAR49", "VAR50", "VAR51", "VAR52",
+  "VAR53"
+)
+
+for (v in variables_to_collapse) {
+  processed <- collapse_dummies(processed, v)
+}
+```
+
+### Data verification — conflict check
+
+After collapsing, any row with value -1 indicates a respondent who marked multiple options in a single-select question. These are printed below for manual review.
+
+```{r}
+conflict_cols <- intersect(variables_to_collapse, names(processed))
+conflict_counts <- processed %>%
+  select(all_of(conflict_cols)) %>%
+  summarise(across(everything(), ~ sum(. == -1, na.rm = TRUE)))
+
+any_conflicts <- any(conflict_counts > 0)
+if (any_conflicts) {
+  cat("DATA WARNING: rows with multiple selections in exclusive groups:\n")
+  for (col in names(conflict_counts)[conflict_counts > 0]) {
+    cat(sprintf("  %s: %d conflicting rows\n", col, conflict_counts[[col]]))
+  }
+} else {
+  cat("Data verification passed: no conflicts found.\n")
+}
+```
+
+------------------------------------------------------------------------
+
+## Chapter 8: Rename variables and apply labels
+
+Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 6 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package.
+
+```{r}
+final <- processed %>%
+  rename(
+    consent                    = VAR00,
+    name                       = VAR01,
+    personNumber               = VAR02,
+    mailAdress                 = VAR03,
+    sex_legal                  = VAR04,
+    gender                     = VAR05,
+    height                     = VAR06,
+    weight                     = VAR07,
+    education                  = VAR08,
+    birthCountry               = VAR09,
+    timeOnWork                 = VAR10_1,
+    timeOnSickleave            = VAR10_2,
+    timeOnStudies              = VAR10_3,
+    painOrAcheLast7Days        = VAR11,
+    painIntensityMean7Days     = VAR13,
+    painIntensityRest7Days     = VAR14,
+    painIntensityMovement7Days = VAR15,
+    painFreq12Months           = VAR16,
+    firstPainDuration          = VAR17,
+    painPersistence            = VAR18
+  ) %>%
+  rename_with(
+    ~ paste0("markedBody", str_extract(.x, "\\d+$")),
+    matches("^VAR12_\\d+$")
+  )
+```
+
+Apply variable labels from VariableView to remaining columns.
+
+```{r}
+lookup <- setNames(
+  str_replace_all(label_table$label, "\\r\\n", " "),
+  label_table$variable
+)
+matched <- intersect(names(final), names(lookup))
+var_label(final[matched]) <- lookup[matched]
+
+for (b in exclusive_bases) {
+  if (b %in% names(final)) {
+    q <- group_info$question[group_info$base == b]
+    if (length(q) == 1) var_label(final[[b]]) <- q
+  }
+}
+```
+
+------------------------------------------------------------------------
+
+## Chapter 9: Export
+
+The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with two sheets: **Data** (one row per respondent) and **Codebook** (variable labels and response options). The `docs/` folder is excluded from version control since it may contain personal data.
+
+```{r}
+dir.create("docs", showWarnings = FALSE)
+
+wb <- createWorkbook()
+
+addWorksheet(wb, "Data")
+writeData(wb, "Data", final)
+
+addWorksheet(wb, "Codebook")
+writeData(wb, "Codebook", codebook_exclusive)
+
+saveWorkbook(wb, "docs/PainSense_processed_data.xlsx", overwrite = TRUE)
+
+cat(sprintf("Exported %d rows and %d variables to docs/PainSense_processed_data.xlsx\n",
+            nrow(final), ncol(final)))
+```
