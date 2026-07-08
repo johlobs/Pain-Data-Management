@@ -349,6 +349,19 @@ processed$VAR07[processed$ID == 7] <- 95
 processed$VAR15_8[processed$ID == 2005] <- 2
 ```
 
+### Weight range flag
+
+Weight values above 200 kg are implausible for this study population and likely indicate a data entry error (e.g. an extra digit, as with the known ID 7 case above). Rather than guessing at a corrected value, these are flagged for manual review via `VAR07_flag` — the raw value is left unchanged.
+
+```{r}
+processed$VAR07_flag <- if_else(!is.na(processed$VAR07) & processed$VAR07 > 200, 1, 0)
+
+if (sum(processed$VAR07_flag, na.rm = TRUE) > 0) {
+  cat(sprintf("WEIGHT FLAG: %d respondent(s) with VAR07 > 200 kg - review manually.\n",
+              sum(processed$VAR07_flag, na.rm = TRUE)))
+}
+```
+
 ### Sex imputation from personnummer
 
 VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for men and even for women.
