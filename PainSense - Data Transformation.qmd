@@ -20,22 +20,21 @@ The pipeline is built on three principles:
 
 ## Chapter 1: Initialization
 
-```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "C:/Users/nepet/Documents/Data Management Sahlgrenska Academy")
-```
-
 ```{r}
 library(tidyverse)
 library(readxl)
 library(rlang)
 library(labelled)
 library(openxlsx)
+library(here)
 ```
+
+File paths are resolved with `here::here()` rather than a hardcoded working directory, so this document runs unchanged regardless of which computer or username it is opened on. `here` finds the project root automatically from the `.git` folder in this repository.
 
 The Excel file has two sheets: **VariableView** (codebook with variable names, labels, types, and value codes) and **Data** (one row per respondent).
 
 ```{r}
-filepath <- "NULLdata_MenWomen_Baseline_Facebook_250401.xlsx"
+filepath <- here::here("NULLdata_MenWomen_Baseline_Facebook_250401.xlsx")
 vv        <- read_excel(filepath, sheet = "VariableView")
 processed <- read_excel(filepath, sheet = "Data")
 ```
@@ -1191,7 +1190,7 @@ Now only some details remain in the table such as removing the "base" variable t
 The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with two sheets: **Data** (one row per respondent) and **Codebook** (variable labels and response options). The `docs/` folder is excluded from version control since it may contain personal data.
 
 ```{r}
-dir.create("docs", showWarnings = FALSE)
+dir.create(here::here("docs"), showWarnings = FALSE)
 
 wb <- createWorkbook()
 
@@ -1201,8 +1200,9 @@ writeData(wb, "Data", final)
 addWorksheet(wb, "Codebook")
 writeData(wb, "Codebook", codebook_exclusive)
 
-saveWorkbook(wb, "docs/PainSense_processed_data.xlsx", overwrite = TRUE)
+export_path <- here::here("docs", "PainSense_processed_data.xlsx")
+saveWorkbook(wb, export_path, overwrite = TRUE)
 
-cat(sprintf("Exported %d rows and %d variables to docs/PainSense_processed_data.xlsx\n",
-            nrow(final), ncol(final)))
+cat(sprintf("Exported %d rows and %d variables to %s\n",
+            nrow(final), ncol(final), export_path))
 ```
