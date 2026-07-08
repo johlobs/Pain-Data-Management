@@ -42,7 +42,98 @@ processed <- read_excel(filepath, sheet = "Data")
 
 ------------------------------------------------------------------------
 
-## Chapter 2: Variable Classification
+## Chapter 2: Data Requirements Check
+
+This chapter verifies that the imported dataset satisfies the structural and type assumptions the rest of this pipeline depends on. It is a hard gate: if a requirement is not met, execution stops here with a specific error message, rather than allowing a downstream chapter to fail on a symptom (e.g. a corrupted personnummer surfacing as a wrong birthyear several chapters later).
+
+These requirements should already be guaranteed by the data cleaning script that runs before this pipeline (see `docs/workflow.md`) — this check exists as a safety net, not as the primary place these issues should be fixed.
+
+```{r}
+verify_data_requirements <- function(processed, vv) {
+  errors <- character(0)
+
+  required_vv_cols <- c("Variable Name", "Label", "Type", "Data Type", "Value Codes", "Missing Code")
+  missing_vv_cols <- setdiff(required_vv_cols, names(vv))
+  if (length(missing_vv_cols) > 0)
+    errors <- c(errors, paste0(
+      "VariableView is missing columns: ", paste(missing_vv_cols, collapse = ", ")))
+
+  if (!"ID" %in% names(processed)) {
+    errors <- c(errors, "Data sheet is missing an ID column.")
+  } else if (anyDuplicated(processed$ID) > 0) {
+    errors <- c(errors, "ID column contains duplicate respondent IDs.")
+  }
+
+  if (!"VAR02" %in% names(processed)) {
+    errors <- c(errors, "VAR02 (personnummer) column is missing.")
+  } else if (!is.character(processed$VAR02)) {
+    errors <- c(errors,
+      "VAR02 (personnummer) was not read as character - check col_types in the data cleaning step.")
+  } else if (any(grepl(",", processed$VAR02), na.rm = TRUE)) {
+    errors <- c(errors,
+      "VAR02 contains comma characters - the ',00' import artifact was not trimmed upstream.")
+  }
+
+  if (!"Svarstillfälle" %in% names(processed)) {
+    errors <- c(errors, "Svarstillfälle column is missing.")
+  } else {
+    parsed <- suppressWarnings(
+      lubridate::parse_date_time(processed$Svarstillfälle, orders = c("ymd", "dmy"))
+    )
+    if (all(is.na(parsed)))
+      errors <- c(errors, "Svarstillfälle could not be parsed as a date for any respondent.")
+  }
+
+  for (v in c("VAR06", "VAR07")) {
+    if (!v %in% names(processed)) {
+      errors <- c(errors, paste0(v, " column is missing."))
+    } else if (!is.numeric(processed[[v]])) {
+      errors <- c(errors, paste0(v, " is not numeric."))
+    }
+  }
+
+  if (length(errors) > 0) {
+    stop("Pre-processing check failed:\n  - ", paste(errors, collapse = "\n  - "), call. = FALSE)
+  }
+
+  cat("Pre-processing check passed: all data requirements satisfied.\n")
+}
+
+verify_data_requirements(processed, vv)
+```
+
+------------------------------------------------------------------------
+
+## Chapter 3: Personnummer Standardization
+
+VAR02 (personnummer) arrives as either a 10-digit (`YYMMDD` + 4 control digits) or 12-digit (`YYYYMMDD` + 4 control digits) string. This chapter standardizes every value to the full 12-digit form so that downstream chapters (sex imputation, birthyear extraction) can rely on a single consistent format instead of each branching on length separately.
+
+Century is inferred for 10-digit values using the same assumption used later in this document for birthyear: no respondent is born before 1915, so `YY >= 15` is assumed to be `19YY`, otherwise `20YY`. All 4 control digits are kept unchanged.
+
+```{r}
+processed <- processed %>%
+  mutate(
+    pnr_len = nchar(VAR02),
+    pnr_yy  = as.integer(substr(VAR02, 1, 2)),
+    VAR02   = case_when(
+      pnr_len == 12 ~ VAR02,
+      pnr_len == 10 ~ paste0(if_else(pnr_yy >= 15L, "19", "20"), VAR02),
+      TRUE          ~ NA_character_
+    )
+  ) %>%
+  select(-pnr_len, -pnr_yy)
+
+pnr <- processed$VAR02
+
+cat(sprintf(
+  "Personnummer standardized: %d of %d values are now 12 digits (%d could not be standardized).\n",
+  sum(nchar(pnr) == 12, na.rm = TRUE), nrow(processed), sum(is.na(pnr))
+))
+```
+
+------------------------------------------------------------------------
+
+## Chapter 4: Variable Classification
 
 Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
 
@@ -175,11 +266,11 @@ codebook_non_exclusive <- label_table %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 3: Verification
+## Chapter 5: Verification
 
-This chapter cross-checks the manual classification from Chapter 2 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early — for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
+This chapter cross-checks the manual classification from Chapter 4 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early — for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
 
-`verify_classification()` takes the `group_info` table built in Chapter 2 and runs five checks:
+`verify_classification()` takes the `group_info` table built in Chapter 4 and runs five checks:
 
 1.  **Unclassified variables** — any `VARnn` base that does not appear in `exclusive`, `non_exclusive`, or `matrix_groups`.
 2.  **Exclusive classified as Matrix in VariableView** — the Type column in VariableView says "Matrix" but the variable is in the `exclusive` vector.
@@ -241,11 +332,11 @@ verify_classification(group_info)
 
 ------------------------------------------------------------------------
 
-## Chapter 4: Data adjustments
+## Chapter 6: Data adjustments
 
 This chapter corrects known errors tied to specific respondents, identified through manual data review. Each correction is tied to a specific ID and a documented reason. This chapter changes with each new wave of data review — if a new error is found, a new line is added here.
 
-It does not handle general format or encoding uncertainties (such as ambiguous date formats); those are addressed defensively in Chapter 6 at the point where each variable is actually used.
+It does not handle general format or encoding uncertainties (such as ambiguous date formats); those are addressed defensively in Chapter 8 at the point where each variable is actually used.
 
 ### Data entry errors
 
@@ -263,12 +354,11 @@ processed$VAR15_8[processed$ID == 2005] <- 2
 
 VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for men and even for women.
 
-`pnr` is stored as a vector here and reused in Chapter 6 to derive birth year.
+`pnr` was standardized to a consistent 12-digit format in Chapter 3 and is reused here and in Chapter 8 to derive birth year.
 
-Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 5 recodes 2 → 0. Assigning 1 here means "this option was selected".
+Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 7 recodes 2 → 0. Assigning 1 here means "this option was selected".
 
 ```{r}
-pnr       <- trimws(as.character(processed$VAR02))
 sex_digit <- as.integer(substr(pnr, nchar(pnr) - 1, nchar(pnr) - 1))
 is_woman  <- sex_digit %% 2 == 0
 
@@ -282,9 +372,9 @@ if (any(sex_missing, na.rm = TRUE)) {
 
 ------------------------------------------------------------------------
 
-## Chapter 5: Standardization of values
+## Chapter 7: Standardization of values
 
-All variables are standardized before any derived variables are created in Chapter 6.
+All variables are standardized before any derived variables are created in Chapter 8.
 
 Two transformations are applied depending on variable type:
 
@@ -316,13 +406,13 @@ processed <- processed %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 6: Formation of new variables
+## Chapter 8: Formation of new variables
 
-This chapter derives all variables ready for analysis from the standardized data. Unlike Chapter 4, corrections here are not tied to specific respondents — they reflect general defensive handling of format and encoding uncertainties that could arise in any data export (e.g. ambiguous date formats, missing values that carry a substantive meaning).
+This chapter derives all variables ready for analysis from the standardized data. Unlike Chapter 6, corrections here are not tied to specific respondents — they reflect general defensive handling of format and encoding uncertainties that could arise in any data export (e.g. ambiguous date formats, missing values that carry a substantive meaning).
 
 ### Age and birthyear
 
-Birthyear is extracted from personnummer. Swedish personal numbers can be 10 or 12 digits. Assuming no one is born before 1915: for 10-digit numbers, YY ≥ 15 → 19YY, else → 20YY.
+Birthyear is extracted directly from the now-standardized 12-digit personnummer (Chapter 3) — the century-inference logic previously needed here for 10-digit numbers is no longer necessary, since `pnr` is guaranteed to be 12 digits by this point.
 
 `Svarstillfälle` (survey date) is parsed with `lubridate::parse_date_time()` to handle both `yyyy-mm-dd` and `dd-mm-yyyy` formats, which may differ between export tools and operating system locale settings.
 
@@ -332,19 +422,13 @@ resp_year <- as.integer(format(
   "%Y"
 ))
 
-yy <- as.integer(substr(pnr, 1, 2))
-processed$birthyear <- case_when(
-  nchar(pnr) == 12  ~ as.integer(substr(pnr, 1, 4)),
-  yy >= 15L         ~ 1900L + yy,
-  TRUE              ~ 2000L + yy
-)
-
+processed$birthyear <- as.integer(substr(pnr, 1, 4))
 processed$age <- resp_year - processed$birthyear
 ```
 
 ### Sex and gender identity
 
-VAR04 (legal sex) and VAR05 (gender identity) are exclusively coded binary variables. They are collapsed to single numeric columns in Chapter 7 and given descriptive names in Chapter 8. No derived variables are created here.
+VAR04 (legal sex) and VAR05 (gender identity) are exclusively coded binary variables. They are collapsed to single numeric columns in Chapter 9 and given descriptive names in Chapter 10. No derived variables are created here.
 
 ### Body Mass Index
 
@@ -380,7 +464,7 @@ processed <- processed %>%
 
 ### Education and origin
 
-`edu_BIN` dichotomises education for Rasch analysis: 0 = non-university (grundskola, gymnasium), 1 = university or higher education. It is taken directly from VAR08_3, which is already 0/1 after Chapter 5 recoding. The full education variable (VAR08) is collapsed and renamed in Chapters 7 and 8.
+`edu_BIN` dichotomises education for Rasch analysis: 0 = non-university (grundskola, gymnasium), 1 = university or higher education. It is taken directly from VAR08_3, which is already 0/1 after Chapter 7 recoding. The full education variable (VAR08) is collapsed and renamed in Chapters 9 and 10.
 
 `origin` encodes birth country as an ordinal variable by combining three binary columns with weights: VAR09_2 (other Nordic) × 1, VAR09_3 (European non-Nordic) × 2, VAR09_4 (outside Europe) × 3. Respondents born in Sweden (VAR09_1) are the reference category and receive 0.
 
@@ -684,7 +768,7 @@ processed$psq17_sum <- rowMeans(processed[, paste0("VAR21_", 1:17)],
 
 The CSI measures symptoms associated with central sensitisation. It has two parts.
 
-**Part A** (VAR22, Q16) consists of 25 symptom items rated on a 1–5 scale, shifted to 0–4 in Chapter 5. The total score `csi` ranges from 0 to 100, with higher scores indicating greater central sensitisation.
+**Part A** (VAR22, Q16) consists of 25 symptom items rated on a 1–5 scale, shifted to 0–4 in Chapter 7. The total score `csi` ranges from 0 to 100, with higher scores indicating greater central sensitisation.
 
 ```{r}
 processed$csi_sum <- rowSums(processed[, paste0("VAR22_", 1:25)])
@@ -765,7 +849,7 @@ processed$had_d_sum <-
 
 ### SCI-93
 
-The SCI-93 (Symptoms Checklist 93) measures psychological distress across 35 items (VAR39, Q20–21). Each item was rated 1–5 and shifted to 0–4 in Chapter 5. The total score ranges from 0 to 140, with higher scores indicating greater distress.
+The SCI-93 (Symptoms Checklist 93) measures psychological distress across 35 items (VAR39, Q20–21). Each item was rated 1–5 and shifted to 0–4 in Chapter 7. The total score ranges from 0 to 140, with higher scores indicating greater distress.
 
 ```{r}
 processed$sci93_sum <- rowSums(processed[, paste0("VAR39_", 1:35)])
@@ -852,7 +936,7 @@ processed$ant_snus[processed$snus < 3] <- 0
 
 ------------------------------------------------------------------------
 
-## Chapter 7: Collapsing exclusive dummies
+## Chapter 9: Collapsing exclusive dummies
 
 Collapses mutually exclusive dummy columns (e.g., VAR04_1, VAR04_2) into a single 0-based categorical column (e.g., VAR04 = 0 or 1). Conflicts, where more than one option is marked, are flagged as **-1** rather than silently dropped as NA, making data errors visible and traceable.
 
@@ -895,7 +979,7 @@ collapsing_function <- function(df, codebook) {
 }
 ```
 
-All exclusively coded variable groups listed below are collapsed. The resulting single column contains the 0-based index of the selected option, which can be used for descriptive purposes. HAD variables (VAR25–38) are also included here; their collapsed values (0–3) represent the selected response option, while the scored subscales `had_a` and `had_d` from Chapter 6 are used for analysis.
+All exclusively coded variable groups listed below are collapsed. The resulting single column contains the 0-based index of the selected option, which can be used for descriptive purposes. HAD variables (VAR25–38) are also included here; their collapsed values (0–3) represent the selected response option, while the scored subscales `had_a` and `had_d` from Chapter 8 are used for analysis.
 
 ```{r}
 processed <- collapsing_function(processed, codebook_exclusive)
@@ -924,9 +1008,9 @@ if (any_conflicts) {
 
 ------------------------------------------------------------------------
 
-## Chapter 8: Rename variables and apply labels
+## Chapter 10: Rename variables and apply labels
 
-Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 6 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package. This will also be the same on the PSQ, CSI and SCI93 questionnaires.
+Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 8 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package. This will also be the same on the PSQ, CSI and SCI93 questionnaires.
 
 ```{r}
 newNames <- c(
@@ -1044,7 +1128,7 @@ final <- final %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 9: Create a new variable view for the dataset
+## Chapter 11: Create a new variable view for the dataset
 
 Now with the data handled, it becomes neccessary to also change the table within which the variables are explained, this table is as shown before known as variable view or vv for short. The process begins with creating the new vv that is to be changed and updated. It will be called processedVV.
 
@@ -1102,7 +1186,7 @@ Now only some details remain in the table such as removing the "base" variable t
 
 ------------------------------------------------------------------------
 
-## Chapter 10: Merge the dataframes and export the result into an excel file
+## Chapter 12: Merge the dataframes and export the result into an excel file
 
 The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with two sheets: **Data** (one row per respondent) and **Codebook** (variable labels and response options). The `docs/` folder is excluded from version control since it may contain personal data.
 
