@@ -35,7 +35,7 @@ library(openxlsx)
 The Excel file has two sheets: **VariableView** (codebook with variable names, labels, types, and value codes) and **Data** (one row per respondent).
 
 ```{r}
-filepath <- "data/Testfile.xlsx"
+filepath <- "NULLdata_MenWomen_Baseline_Facebook_250401.xlsx"
 vv        <- read_excel(filepath, sheet = "VariableView")
 processed <- read_excel(filepath, sheet = "Data")
 ```
@@ -162,7 +162,7 @@ Creates lookup tables mapping each numeric level to its descriptive label.
 codebook_exclusive <- label_table %>%
   filter(base %in% exclusive_bases) %>%
   mutate(
-    sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)),
+    sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)) - 1L,
     option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)
   ) %>%
   select(base, sub_index, option_label, variable)
@@ -415,7 +415,7 @@ This section derives core pain variables from the raw survey data. The variables
 **Derived variables overview**
 
 | Variable | Source | Scale | Interpretation |
-|-----------------|-----------------|------------------|---------------------|
+|------------------|------------------|------------------|-------------------|
 | `pain7days` | VAR11_1 | 0/1 | 1 = pain in the past 7 days |
 | `pain_duration` | VAR17_1–5 | 0–4 | 0 = \<1 month, …, 4 = ≥2 years |
 | `chronic_pain` | `pain7days` + `pain_duration` | 0/1 | 1 = current pain AND duration ≥ 3 months |
@@ -857,20 +857,40 @@ processed$ant_snus[processed$snus < 3] <- 0
 Collapses mutually exclusive dummy columns (e.g., VAR04_1, VAR04_2) into a single 0-based categorical column (e.g., VAR04 = 0 or 1). Conflicts, where more than one option is marked, are flagged as **-1** rather than silently dropped as NA, making data errors visible and traceable.
 
 ```{r}
-collapse_dummies <- function(df, prefix) {
-  cols <- grep(paste0("^", prefix, "_"), names(df), value = TRUE)
-  cols <- cols[order(as.numeric(sub(paste0(prefix, "_"), "", cols)))]
-
-  result <- apply(df[cols], 1, function(row) {
-    hit <- which(row == 1)
-    if (length(hit) == 1) return(hit - 1)   # 0-based
-    if (length(hit) == 0) return(NA)         # unanswered
-    return(-1)                               # conflict: multiple options marked
-  })
-
-  df[[cols[1]]] <- result
-  names(df)[names(df) == cols[1]] <- prefix
-  df[cols[-1]] <- NULL
+collapsing_function <- function(df, codebook) {
+  bases <- unique(codebook$base)
+  
+  for (base_name in bases) {
+    cb <- codebook %>%
+      filter(base == base_name) %>%
+      arrange(sub_index)
+    
+    col_names <- paste0(base_name, "_", cb$sub_index + 1L)
+    
+    missing_cols <- setdiff(col_names, names(df))
+    if (length(missing_cols) > 0) {
+      warning(base_name, ": saknade kolumner – ", paste(missing_cols, collapse = ", "))
+      next
+    }
+    
+    if (anyDuplicated(col_names) > 0) {
+      warning(base_name, ": dublettkolumner i codebook, skippar")
+      next
+    }
+    
+    result <- apply(df[col_names], 1, function(row) {
+      if (any(!is.na(row) & !(row %in% c(0, 1)))) return(-1L)
+      hit <- which(row == 1)
+      if (length(hit) == 1) return(cb$sub_index[hit])
+      if (length(hit) == 0) return(NA_integer_)
+      return(-1L)
+    })
+    
+    df[[col_names[1]]] <- result
+    names(df)[names(df) == col_names[1]] <- base_name
+    df[col_names[-1]] <- NULL
+  }
+  
   df
 }
 ```
@@ -878,22 +898,7 @@ collapse_dummies <- function(df, prefix) {
 All exclusively coded variable groups listed below are collapsed. The resulting single column contains the 0-based index of the selected option, which can be used for descriptive purposes. HAD variables (VAR25–38) are also included here; their collapsed values (0–3) represent the selected response option, while the scored subscales `had_a` and `had_d` from Chapter 6 are used for analysis.
 
 ```{r}
-variables_to_collapse <- c(
-  "VAR04", "VAR05",
-  "VAR08", "VAR09",
-  "VAR11", "VAR13", "VAR14", "VAR15",
-  "VAR16", "VAR17", "VAR18",
-  "VAR25", "VAR26", "VAR27", "VAR28", "VAR29", "VAR30", "VAR31",
-  "VAR32", "VAR33", "VAR34", "VAR35", "VAR36", "VAR37", "VAR38",
-  "VAR41", "VAR42", "VAR43", "VAR44",
-  "VAR45", "VAR46", "VAR47", "VAR48",
-  "VAR49", "VAR50", "VAR51", "VAR52",
-  "VAR53"
-)
-
-for (v in variables_to_collapse) {
-  processed <- collapse_dummies(processed, v)
-}
+processed <- collapsing_function(processed, codebook_exclusive)
 ```
 
 ### Data verification — conflict check
@@ -901,7 +906,7 @@ for (v in variables_to_collapse) {
 After collapsing, any row with value -1 indicates a respondent who marked multiple options in a single-select question. These are printed below for manual review.
 
 ```{r}
-conflict_cols <- intersect(variables_to_collapse, names(processed))
+conflict_cols <- intersect(unique(codebook_exclusive$base), names(processed))
 conflict_counts <- processed %>%
   select(all_of(conflict_cols)) %>%
   summarise(across(everything(), ~ sum(. == -1, na.rm = TRUE)))
@@ -924,84 +929,86 @@ if (any_conflicts) {
 Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 6 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package. This will also be the same on the PSQ, CSI and SCI93 questionnaires.
 
 ```{r}
+newNames <- c(
+  consent                                   = "VAR00",
+  name                                      = "VAR01",
+  personNumber                              = "VAR02",
+  mailAdress                                = "VAR03",
+  sexLegal                                  = "VAR04",
+  gender                                    = "VAR05",
+  height                                    = "VAR06",
+  weight                                    = "VAR07",
+  education                                 = "VAR08",
+  birthCountry                              = "VAR09",
+  timeOnWork                                = "VAR10_1",
+  timeOnSickleave                           = "VAR10_2",
+  timeOnStudies                             = "VAR10_3",
+  painOrAcheLast7Days                       = "VAR11",
+  painIntensityMean7Days                    = "VAR13",
+  painIntensityRest7Days                    = "VAR14",
+  painIntensityMovement7Days                = "VAR15",
+  painFreq12Months                          = "VAR16",
+  firstPainDuration                         = "VAR17",
+  painPersistence                           = "VAR18",
+  majorInterventionPast12MoMultimodalRehab  = "VAR20_1",
+  majorInterventionPast12MoSpinalCordStim   = "VAR20_2",
+  majorInterventionPast12MoSurgery          = "VAR20_3",
+  majorInterventionPast12MoSurgeryType      = "VAR20_4",
+  majorInterventionPast12MoOpioidWithdrawal = "VAR20_5",
+  majorInterventionPast12MoOther            = "VAR20_6",
+  majorInterventionPast12MoOtherType        = "VAR20_7",
+  CSIDiagnosedByDoctorRestless               = "VAR23_1",
+  CSIDiagnosedByDoctorChronicFatigue         = "VAR23_2",
+  CSIDiagnosedByDoctorFibromyalgia           = "VAR23_3",
+  CSIDiagnosedByDoctorTMD                    = "VAR23_4",
+  CSIDiagnosedByDoctorheadacheMigraine       = "VAR23_5",
+  CSIDiagnosedByDoctorIBS                    = "VAR23_6",
+  CSIDiagnosedByDoctorChemicalSens           = "VAR23_7",
+  CSIDiagnosedByDoctorNeckPain               = "VAR23_8",
+  CSIDiagnosedByDoctorAnxietyOrPanicAttack    = "VAR23_9",
+  CSIDiagnosedByDoctorDepression              = "VAR23_10",
+  doctorDiagnosedArthritis                   = "VAR24_1",
+  doctorDiagnosedExhaustionSyndrome          = "VAR24_2",
+  doctorDiagnosedCardiovascular              = "VAR24_3",
+  doctorDiagnosedDiabetes                    = "VAR24_4",
+  doctorDiagnosedRespiratory                 = "VAR24_5",
+  doctorDiagnosedSkinDisease                 = "VAR24_6",
+  doctorDiagnosedCancer                      = "VAR24_7",
+  doctorDiagnosedPostCovid                   = "VAR24_8",
+  HAD1TenseOrWoundUp                         = "VAR25",
+  HAD2EnjoysThingsIUsedTo                    = "VAR26",
+  HAD3FrightFeelingSomethingBadWillHappen    = "VAR27",
+  HAD4LaughAndSeeFunnySideInThings           = "VAR28",
+  HAD5WorryingThoughtsThroughMinf            = "VAR29",
+  HAD6IsCheerful                             = "VAR30",
+  HAD7AtEaseAndRelax                         = "VAR31",
+  HAD8FeelsSlowedDown                        = "VAR32",
+  HAD9FeelsButterflyStomach                  = "VAR33",
+  HAD10NoInterestInAppearance                = "VAR34",
+  HAD11RestlessNeedToMove                    = "VAR35",
+  HAD12LookForwardEnjoyment                  = "VAR36",
+  HAD13SuddenPanicFeeling                    = "VAR37",
+  HAD14EnjoyGoodBookOrRadioOrTv               = "VAR38",
+  sleep22TroubleFallingasleep                = "VAR40_1",
+  sleep22TroubleStayingAsleep                = "VAR40_2",
+  sleep22WakingUppTooEarly                   = "VAR40_3",
+  sleepScheduleSatisfaction                  = "VAR41",
+  badSleepAffectsDayFunction                 = "VAR42",
+  noticeBadSleepLifeQuality                  = "VAR43",
+  worriedAboutSleepProblem                   = "VAR44",
+  physActHowMuchTimeShortBreath              = "VAR45",
+  physActAtLeast30MinShortBreath             = "VAR46",
+  physActTimeOnEverydayExercise              = "VAR47",
+  physActDaysSpent30MinExercise              = "VAR48",
+  smoker                                     = "VAR49",
+  howManyCigsPerDay                          = "VAR50",
+  snuser                                     = "VAR51",
+  howManySnusPacksPerWeek                    = "VAR52",
+  canWeContactLater                          = "VAR53"
+)
+
 final <- processed %>%
-  rename(
-    consent                                 = VAR00,
-    name                                    = VAR01,
-    personNumber                            = VAR02,
-    mailAdress                              = VAR03,
-    sexLegal                                = VAR04,
-    gender                                  = VAR05,
-    height                                  = VAR06,
-    weight                                  = VAR07,
-    education                               = VAR08,
-    birthCountry                            = VAR09,
-    timeOnWork                              = VAR10_1,
-    timeOnSickleave                         = VAR10_2,
-    timeOnStudies                           = VAR10_3,
-    painOrAcheLast7Days                     = VAR11,
-    painIntensityMean7Days                  = VAR13,
-    painIntensityRest7Days                  = VAR14,
-    painIntensityMovement7Days              = VAR15,
-    painFreq12Months                        = VAR16,
-    firstPainDuration                       = VAR17,
-    painPersistence                         = VAR18,
-    majorInterventionPast12MoMultimodalRehab  = VAR20_1,
-    majorInterventionPast12MoSpinalCordStim   = VAR20_2,
-    majorInterventionPast12MoSurgery          = VAR20_3,
-    majorInterventionPast12MoSurgeryType      = VAR20_4,
-    majorInterventionPast12MoOpioidWithdrawal = VAR20_5,
-    majorInterventionPast12MoOther            = VAR20_6,
-    majorInterventionPast12MoOtherType        = VAR20_7,
-    CSIDiagnosedByDoctorRestless            = VAR23_1,
-    CSIDiagnosedByDoctorChronicFatigue      = VAR23_2,
-    CSIDiagnosedByDoctorFibromyalgia        = VAR23_3, 
-    CSIDiagnosedByDoctorTMD                 = VAR23_4,
-    CSIDiagnosedByDoctorheadacheMigraine    = VAR23_5,
-    CSIDiagnosedByDoctorIBS                 = VAR23_6,
-    CSIDiagnosedByDoctorChemicalSens        = VAR23_7,
-    CSIDiagnosedByDoctorNeckPain            = VAR23_8,
-    CSIDiagnosedByDoctorAnxietyOrPanicAttack= VAR23_9,
-    CSIDiagnosedByDoctorDepression          = VAR23_10,
-    doctorDiagnosedArthritis                = VAR24_1,  
-    doctorDiagnosedExhaustionSyndrome       = VAR24_2,  
-    doctorDiagnosedCardiovascular           = VAR24_3,  
-    doctorDiagnosedDiabetes                 = VAR24_4,  
-    doctorDiagnosedRespiratory              = VAR24_5,
-    doctorDiagnosedSkinDisease              = VAR24_6,
-    doctorDiagnosedCancer                   = VAR24_7,
-    doctorDiagnosedPostCovid                = VAR24_8,
-    HAD1TenseOrWoundUp                      = VAR25,
-    HAD2EnjoysThingsIUsedTo                 = VAR26,
-    HAD3FrightFeelingSomethingBadWillHappen = VAR27,
-    HAD4LaughAndSeeFunnySideInThings        = VAR28,
-    HAD5WorryingThoughtsThroughMinf         = VAR29,
-    HAD6IsCheerful                          = VAR30,
-    HAD7AtEaseAndRelax                      = VAR31,
-    HAD8FeelsSlowedDown                     = VAR32,
-    HAD9FeelsButterflyStomach               = VAR33,
-    HAD10NoInterestInAppearance             = VAR34,
-    HAD11RestlessNeedToMove                 = VAR35,
-    HAD12LookForwardEnjoyment               = VAR36,
-    HAD13SuddenPanicFeeling                 = VAR37,
-    HAD14EnjoyGoodBookOrRadioOrTv           = VAR38,
-    sleep22TroubleFallingasleep             = VAR40_1,
-    sleep22TroubleStayingAsleep             = VAR40_2,
-    sleep22WakingUppTooEarly                = VAR40_3,
-    sleepScheduleSatisfaction               = VAR41,
-    badSleepAffectsDayFunction              = VAR42,
-    noticeBadSleepLifeQuality               = VAR43,
-    worriedAboutSleepProblem                = VAR44,
-    physActHowMuchTimeShortBreath           = VAR45,
-    physActAtLeast30MinShortBreath          = VAR46,
-    physActTimeOnEverydayExercise           = VAR47,
-    physActDaysSpent30MinExercise           = VAR48,
-    smoker                                  = VAR49,
-    howManyCigsPerDay                       = VAR50,
-    snuser                                  = VAR51,
-    howManySnusPacksPerWeek                 = VAR52,
-    canWeContactLater                       = VAR53,
-  )
+  rename(!!!newNames)
 ```
 
 Rename the uncollapsed variables to be informative as well
@@ -1037,7 +1044,65 @@ final <- final %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 9: Export
+## Chapter 9: Create a new variable view for the dataset
+
+Now with the data handled, it becomes neccessary to also change the table within which the variables are explained, this table is as shown before known as variable view or vv for short. The process begins with creating the new vv that is to be changed and updated. It will be called processedVV.
+
+```{r}
+processedVV <- label_table
+```
+
+This VV will now go through similar steps as the dataset did, starting first with having the exclusive varaibles collapsed with the following function.
+
+```{r}
+collapse_vv <- function(vv_df, codebook) {
+  for (base_name in unique(codebook$base)) {
+    cb <- codebook %>%
+      filter(base == base_name) %>%
+      arrange(sub_index)                     # garanterar 0,1,2,... ordning
+    
+    rows <- which(vv_df$variable %in% cb$variable)
+    if (length(rows) == 0) next
+    
+    # "0 = Grundskola...; 1 = Gymnasie...; 2 = Högskole..."
+    value_string <- paste(cb$sub_index, cb$option_label,
+                          sep = " = ", collapse = "; ")
+    
+    # Frågestammen = texten FÖRE " - " (samma logik som group_info$question)
+    question <- sub(" - .*", "", vv_df$label[rows[1]]) %>%
+      str_replace_all("\\r\\n", " ") %>%
+      str_trim()
+    
+    # Skriv in i första raden, döp om till basnamnet, släng resten
+    vv_df$variable[rows[1]] <- base_name
+    vv_df$label[rows[1]]    <- question
+    vv_df$values[rows[1]]   <- value_string
+    vv_df$base[rows[1]]     <- base_name
+    vv_df <- vv_df[-rows[-1], ]
+  }
+  vv_df
+}
+
+
+```
+
+Collapsing gives the updated table
+
+```{r}
+processedVV <- collapse_vv(label_table, codebook_exclusive)
+```
+
+After this it is important to rename the variables so that the description actually matches the variables in the data, the vector which was used to rename the variables can luckily be reused here.
+
+```{r}
+processedVV <- processedVV %>% rename(!!!newNames)
+```
+
+Now only some details remain in the table such as removing the "base" variable that was created and also adjusting some values to match what actually is present in the data.
+
+------------------------------------------------------------------------
+
+## Chapter 10: Merge the dataframes and export the result into an excel file
 
 The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with two sheets: **Data** (one row per respondent) and **Codebook** (variable labels and response options). The `docs/` folder is excluded from version control since it may contain personal data.
 
