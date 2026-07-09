@@ -1338,6 +1338,7 @@ vvProcessed <- vvProcessed %>%
 ```
 
 Then it is time to translate the `labels`into english from swedish
+
 ```{r}
 vv_translations <- bind_rows(
   tribble(
@@ -1507,7 +1508,8 @@ vvProcessed %>%
   pull(variable)
 ```
 
-Finally `vvProcessed`and `vv_derived`are merged into the final variableview file: `vvFinal``
+Finally `vvProcessed`and `vv_derived`are merged into the final variableview file: \`vvFinal\`\`
+
 ```{r}
 vvFinal <- bind_rows(vvProcessed, vv_derived) %>% 
   relocate(variable, label, type, data_type, values, missing, original_label)
