@@ -1250,6 +1250,269 @@ vvProcessed <- vvProcessed %>%
   )
 ```
 
+Lastly, to complete the variableview, it is neccessary to add the variables that have been created in this document. Due to the nature of the different variables this will need to be done by hand through the creation of a vector.
+
+```{r}
+# Skelett: allt i final som saknar VV-rad
+vv_derived <- tibble(variable = setdiff(names(final), vvProcessed$variable)) %>%
+  mutate(label = NA_character_, type = "Derived", data_type = "Numeric",
+         values = NA_character_, missing = NA_real_,
+         original_label = NA_character_)
+
+vv_fill <- tribble(
+  ~variable,            ~label,                                                           ~values,
+  # Demographics
+  "birthyear",          "Year of birth, extracted from personal number (VAR02)",          "Continuous",
+  "age",                "Age at response (years): response year minus birthyear",         "Range 18-",
+  "BMI",                "Body Mass Index, weight/height^2 (kg/m2), from VAR06-VAR07",     "Continuous",
+  "BMI_4cat",           "BMI category (WHO): <18.5 / 18.5-24.9 / 25-29.9 / >=30",         "0 = Underweight; 1 = Normal weight; 2 = Overweight; 3 = Obese",
+  "BMI_6cat",           "BMI category (WHO): obesity split into I (30-34.9) / II (35-39.9) / III (>=40)", "0 = Underweight; 1 = Normal weight; 2 = Overweight; 3 = Obese I; 4 = Obese II; 5 = Obese III",
+  "edu_BIN",            "Education dichotomised for Rasch analysis (from VAR08_3)",       "0 = Non-university; 1 = University",
+  "origin",             "Region of birth (Q5), weighted sum of VAR09_2-VAR09_4",          "0 = Sweden; 1 = Other Nordic; 2 = Europe non-Nordic; 3 = Outside Europe",
+  "pensioner65",        "Aged >=65 with no work/sick leave/studies (retirement proxy)",   "0 = No; 1 = Yes",
+  # Pain presence & extent
+  "pain7days",          "Any pain or ache during the last 7 days (Q7a)",                  "0 = No; 1 = Yes",
+  "chronic_pain",       "Pain last 7 days with duration >= 3 months (Q7a + Q11)",         "0 = No; 1 = Yes",
+  "nr_sites",           "Number of marked pain sites (Q7b), NA if no pain last 7 days",   "Range 0-45",
+  # ACR90
+  "upper_right_acr90",  "Helper: n pain sites, upper right quadrant (ACR90)",             "Range 0-8",
+  "upper_left_acr90",   "Helper: n pain sites, upper left quadrant (ACR90)",              "Range 0-8",
+  "lower_right_acr90",  "Helper: n pain sites, lower right quadrant (ACR90)",             "Range 0-7",
+  "lower_left_acr90",   "Helper: n pain sites, lower left quadrant (ACR90)",              "Range 0-7",
+  "axial_acr90",        "Helper: n pain sites, axial region (ACR90)",                     "Range 0-8",
+  "contralat_1",        "Helper: axial + lower left + upper right pain present",          "0 = No; 1 = Yes",
+  "contralat_2",        "Helper: axial + lower right + upper left pain present",          "0 = No; 1 = Yes",
+  "ACR90",              "Widespread pain, ACR 1990 definition",                           "0 = No; 1 = Yes",
+  "ChronicP_ACR90",     "Chronic widespread pain (chronic_pain & ACR90)",                 "0 = No; 1 = Yes",
+  # WP2019
+  "upper_right_wp2019", "Helper: pain in region 2, right upper (WP2019)",                 "0 = No; 1 = Yes",
+  "upper_left_wp2019",  "Helper: pain in region 1, left upper (WP2019)",                  "0 = No; 1 = Yes",
+  "lower_right_wp2019", "Helper: pain in region 4, right lower (WP2019)",                 "0 = No; 1 = Yes",
+  "lower_left_wp2019",  "Helper: pain in region 3, left lower (WP2019)",                  "0 = No; 1 = Yes",
+  "axial_wp2019",       "Helper: pain in region 5, axial (WP2019)",                       "0 = No; 1 = Yes",
+  "WPI_AGE",            "Widespread Pain Index, modified site-group count",               "Range 0-19",
+  "nr_regions_wp2019",  "Number of WP2019 body regions with pain (of 5)",                 "Range 0-5",
+  "CP_WP2019_AGE",      "Chronic widespread pain per WP2019 criteria",                    "0 = No; 1 = Yes",
+  "Pain3cat_CWSP2019",  "Pain category from chronicity and WP2019 status",                "0 = No chronic pain; 1 = Chronic pain, not widespread; 2 = Chronic widespread pain",
+  # Treatments
+  "trt_mmr",            "Last 12 mo: multimodal pain rehabilitation (Q14)",               "0 = No; 1 = Yes",
+  "trt_neurostim",      "Last 12 mo: spinal cord stimulation (Q14)",                      "0 = No; 1 = Yes",
+  "trt_surgery",        "Last 12 mo: surgical procedure (Q14)",                           "0 = No; 1 = Yes",
+  "trt_opioid",         "Last 12 mo: opioid withdrawal (Q14)",                            "0 = No; 1 = Yes",
+  "trt_other",          "Last 12 mo: other major treatment (Q14)",                        "0 = No; 1 = Yes",
+  # Instrument scores
+  "psq14_sum",          "PSQ-14 mean score (excl. non-painful items c, e, m)",            "Range 0-10",
+  "psq17_sum",          "PSQ-17 mean score (all 17 items)",                               "Range 0-10",
+  "csi_sum",            "CSI part A total score (25 items, 0-4 each)",                    "Range 0-100",
+  "had_a_sum",          "HADS anxiety subscale (>=8 possible, >=11 probable case)",       "Range 0-21",
+  "had_d_sum",          "HADS depression subscale (>=8 possible, >=11 probable case)",    "Range 0-21",
+  "sci93_sum",          "SCI-93 total score (35 items, 0-4 each)",                        "Range 0-140",
+  "ISI_sum",            "Insomnia Severity Index total (severity + impact items)",        "Range 0-28",
+  # Lifestyle
+  "PE_time",            "Weekly time on vigorous exercise (Q27)",                         "0 = None; 1 = <30 min; 2 = 30-60; 3 = 60-90; 4 = 90-120; 5 = >120 min",
+  "PE_days",            "Days/week with >=30 min vigorous exercise (Q28)",                "Range 0-7",
+  "PA_time",            "Weekly time on everyday physical activity (Q29)",                "0 = None; 1 = <30 min; 2 = 30-60; 3 = 60-90; 4 = 90-150; 5 = 150-300; 6 = >300 min",
+  "PA_days",            "Days/week with >=30 min everyday activity (Q30)",                "Range 0-7",
+  "smoke",              "Smoking status (Q31a)",                                          "0 = Never/quit >6 mo; 1 = Quit <6 mo; 2 = Smokes, not daily; 3 = Smokes daily",
+  "ant_smoke",          "Cigarettes/cigarillos per day, 0 if not daily smoker (Q31b)",    "0 = Not daily smoker; 1 = 1-9/day; 2 = 10-19/day; 3 = 20+/day",
+  "snus",               "Snus status (Q32a)",                                             "0 = Never/quit >6 mo; 1 = Quit <6 mo; 2 = Snus, not daily; 3 = Snus daily",
+  "ant_snus",           "Snus boxes per week, 0 if not daily user (Q32b)",                "0 = Not daily user; 1 = 1-3/wk; 2 = 4-6/wk; 3 = 7+/wk"
+) %>%
+  mutate(type = "Derived", data_type = "Numeric", missing = NA_real_)
+
+vv_derived <- vv_derived %>%
+  rows_update(vv_fill, by = "variable", unmatched = "ignore")
+
+# Kvitto: vad återstår manuellt?
+vv_derived %>% filter(is.na(label)) %>% pull(variable)
+```
+
+Before we merge the datasets together it would be good translate the labels of the original vvProcessed into english since this is the working language of this report. The original descriptions will be saved under `original_labels`.
+
+```{r}
+vvProcessed <- vvProcessed %>%
+  rename(original_label = label) %>%
+  mutate(label = NA_character_) %>%
+  relocate(label, .after = variable) %>%
+  relocate(original_label, .after = last_col())
+```
+
+Then it is time to translate the `labels`into english from swedish
+```{r}
+vv_translations <- bind_rows(
+  tribble(
+    ~variable, ~label,
+    "consent",           "Consent to participate (given by submitting the questionnaire)",
+    "name",              "First and last name",
+    "personNumber",      "Swedish personal identity number",
+    "mailAdress",        "E-mail address",
+    "sexLegal",          "Legal sex (Q1a)",
+    "gender",            "Gender identity (Q1b)",
+    "height",            "Height in cm (Q2)",
+    "weight",            "Weight in kg (Q3)",
+    "education",         "Highest completed education (Q4)",
+    "birthCountry",      "Country/region of birth (Q5)",
+    "timeOnWork",        "Work situation: paid work, extent 25-100% (Q6)",
+    "timeOnSickleave",   "Work situation: sick leave or sickness compensation, extent 25-100% (Q6)",
+    "timeOnStudies",     "Work situation: studies, study pace 25-100% (Q6)",
+    "painOrAcheLast7Days",        "Any pain or ache during the last 7 days (Q7a)",
+    "painIntensityMean7Days",     "Mean pain intensity last 7 days, NRS 0-10 (Q7c)",
+    "painIntensityRest7Days",     "Mean pain intensity last 7 days at rest, NRS 0-10 (Q8)",
+    "painIntensityMovement7Days", "Mean pain intensity last 7 days during movement, NRS 0-10 (Q9)",
+    "painFreq12Months",  "Frequency of pain anywhere in the body, last 12 months (Q10)",
+    "firstPainDuration", "Time since the pain reported in Q7a was first felt (Q11)",
+    "painPersistence",   "Pain reported in Q7a: intermittent or persistent (Q12)",
+    "majorInterventionPast12MoMultimodalRehab",  "Major intervention last 12 mo: multimodal pain rehabilitation programme (Q14)",
+    "majorInterventionPast12MoSpinalCordStim",   "Major intervention last 12 mo: spinal cord stimulation / neuromodulation (Q14)",
+    "majorInterventionPast12MoSurgery",          "Major intervention last 12 mo: other surgical procedure (Q14)",
+    "majorInterventionPast12MoSurgeryType",      "Type of surgical procedure, free text (Q14)",
+    "majorInterventionPast12MoOpioidWithdrawal", "Major intervention last 12 mo: withdrawal of opioid medication (Q14)",
+    "majorInterventionPast12MoOther",            "Major intervention last 12 mo: other major treatment (Q14)",
+    "majorInterventionPast12MoOtherType",        "Type of other major treatment, free text (Q14)",
+    "CSIDiagnosedByDoctorRestless",            "CSI-B: physician-diagnosed restless legs syndrome / Willis-Ekbom disease (Q17a)",
+    "CSIDiagnosedByDoctorChronicFatigue",      "CSI-B: physician-diagnosed chronic fatigue syndrome, e.g. ME/CFS (Q17b)",
+    "CSIDiagnosedByDoctorFibromyalgia",        "CSI-B: physician-diagnosed fibromyalgia (Q17c)",
+    "CSIDiagnosedByDoctorTMD",                 "CSI-B: physician-diagnosed temporomandibular joint disorder (Q17d)",
+    "CSIDiagnosedByDoctorheadacheMigraine",    "CSI-B: physician-diagnosed migraine or tension headache (Q17e)",
+    "CSIDiagnosedByDoctorIBS",                 "CSI-B: physician-diagnosed irritable bowel syndrome (Q17f)",
+    "CSIDiagnosedByDoctorChemicalSens",        "CSI-B: physician-diagnosed multiple chemical sensitivity (Q17g)",
+    "CSIDiagnosedByDoctorNeckPain",            "CSI-B: physician-diagnosed neck injury, incl. whiplash (Q17h)",
+    "CSIDiagnosedByDoctorAnxietyOrPanicAttack","CSI-B: physician-diagnosed anxiety or panic attacks (Q17i)",
+    "CSIDiagnosedByDoctorDepression",          "CSI-B: physician-diagnosed depression (Q17j)",
+    "doctorDiagnosedArthritis",           "Physician-diagnosed rheumatoid arthritis or osteoarthritis (Q18a)",
+    "doctorDiagnosedExhaustionSyndrome",  "Physician-diagnosed stress-induced exhaustion disorder (Q18b)",
+    "doctorDiagnosedCardiovascular",      "Physician-diagnosed cardiovascular disease, e.g. hypertension, angina, MI (Q18c)",
+    "doctorDiagnosedDiabetes",            "Physician-diagnosed diabetes, type 1 or 2 (Q18d)",
+    "doctorDiagnosedRespiratory",         "Physician-diagnosed airway/lung disease, e.g. asthma, emphysema (Q18e)",
+    "doctorDiagnosedSkinDisease",         "Physician-diagnosed skin disease, e.g. eczema, psoriasis (Q18f)",
+    "doctorDiagnosedCancer",              "Physician-diagnosed tumour or cancer (Q18g)",
+    "doctorDiagnosedPostCovid",           "Physician-diagnosed post-COVID condition, >12 weeks after onset (Q18h)",
+    "HAD1TenseOrWoundUp",                      "HADS item 1 (anxiety): feeling tense or wound up (Q19a)",
+    "HAD2EnjoysThingsIUsedTo",                 "HADS item 2 (depression): still enjoying previously enjoyed things (Q19b)",
+    "HAD3FrightFeelingSomethingBadWillHappen", "HADS item 3 (anxiety): frightened feeling something awful will happen (Q19c)",
+    "HAD4LaughAndSeeFunnySideInThings",        "HADS item 4 (depression): can laugh and see the funny side (Q19d)",
+    "HAD5WorryingThoughtsThroughMinf",         "HADS item 5 (anxiety): worrying thoughts (Q19e)",
+    "HAD6IsCheerful",                          "HADS item 6 (depression): feeling cheerful (Q19f)",
+    "HAD7AtEaseAndRelax",                      "HADS item 7 (anxiety): can sit at ease and feel relaxed (Q19g)",
+    "HAD8FeelsSlowedDown",                     "HADS item 8 (depression): feeling slowed down (Q19h)",
+    "HAD9FeelsButterflyStomach",               "HADS item 9 (anxiety): butterflies-in-the-stomach feeling (Q19i)",
+    "HAD10NoInterestInAppearance",             "HADS item 10 (depression): lost interest in own appearance (Q19j)",
+    "HAD11RestlessNeedToMove",                 "HADS item 11 (anxiety): feeling restless (Q19k)",
+    "HAD12LookForwardEnjoyment",               "HADS item 12 (depression): looking forward to things with enjoyment (Q19l)",
+    "HAD13SuddenPanicFeeling",                 "HADS item 13 (anxiety): sudden feelings of panic (Q19m)",
+    "HAD14EnjoyGoodBookOrRadioOrTv",           "HADS item 14 (depression): can enjoy a book, radio or TV (Q19n)",
+    "sleep22TroubleFallingasleep", "ISI severity: difficulty falling asleep (Q22a)",
+    "sleep22TroubleStayingAsleep", "ISI severity: restless or poor sleep (Q22b)",
+    "sleep22WakingUppTooEarly",    "ISI severity: waking up too early (Q22c)",
+    "sleepScheduleSatisfaction",   "ISI: satisfaction with current sleep (Q23)",
+    "badSleepAffectsDayFunction",  "ISI: sleep problems interfere with daily functioning (Q24)",
+    "noticeBadSleepLifeQuality",   "ISI: sleep problems noticeable to others as impaired quality of life (Q25)",
+    "worriedAboutSleepProblem",    "ISI: worry about current sleep problems (Q26)",
+    "physActHowMuchTimeShortBreath",  "Weekly time on vigorous exercise causing breathlessness (Q27)",
+    "physActAtLeast30MinShortBreath", "Days/week with >=30 min vigorous exercise (Q28)",
+    "physActTimeOnEverydayExercise",  "Weekly time on everyday physical activity, e.g. walking, cycling (Q29)",
+    "physActDaysSpent30MinExercise",  "Days/week with >=30 min everyday physical activity (Q30)",
+    "smoker",                  "Smoking status (Q31a)",
+    "howManyCigsPerDay",       "Cigarettes/cigarillos smoked per day (Q31b)",
+    "snuser",                  "Snus use status (Q32a)",
+    "howManySnusPacksPerWeek", "Snus boxes used per week (Q32b)",
+    "canWeContactLater",       "Consent to be contacted about future pain research studies (Q33)"
+  ),
+
+  tibble(variable = paste0("markedBody", 1:45),
+         label = paste0("Pain marking last 7 days, body site ", 1:45, " on body chart (Q7b)")),
+
+  tibble(variable = paste0("painMedName",     1:10),
+         label = paste0("Pain-related medication ", 1:10, ": name (Q13)")),
+  tibble(variable = paste0("painMedDosage",   1:10),
+         label = paste0("Pain-related medication ", 1:10, ": dosage (Q13)")),
+  tibble(variable = paste0("painMedStrength", 1:10),
+         label = paste0("Pain-related medication ", 1:10, ": strength (Q13)")),
+
+  tibble(variable = paste0("PSQ", 1:17),
+         label = paste0("PSQ item ", letters[1:17], ": imagined pain when ", c(
+           "banging shin hard against a hard edge (Q15a)",
+           "burning the tongue on a very hot drink (Q15b)",
+           "having sore muscles after physical activity (Q15c)",
+           "trapping a finger in a drawer (Q15d)",
+           "taking a shower with lukewarm water (Q15e)",
+           "having mild sunburn on the shoulders (Q15f)",
+           "grazing the knee falling off a bicycle (Q15g)",
+           "accidentally biting tongue or cheek while eating (Q15h)",
+           "walking barefoot on a cold tiled floor (Q15i)",
+           "getting lemon juice in a small cut on the finger (Q15j)",
+           "pricking a fingertip on a rose thorn (Q15k)",
+           "holding bare hands in snow for a few minutes (Q15l)",
+           "shaking hands with a normal handshake (Q15m)",
+           "shaking hands with a very firm handshake (Q15n)",
+           "grabbing the hot handles of a pot without thinking (Q15o)",
+           "someone in heavy boots stepping on a sandal-clad foot (Q15p)",
+           "knocking the elbow on a table edge, funny bone (Q15q)"))),
+
+  tibble(variable = paste0("CSI", 1:25),
+         label = paste0("CSI-A item ", c(letters[1:22], "x", "y", "z"), ": ", c(
+           "waking up tired and unrefreshed (Q16a)",
+           "muscles feel stiff and achy (Q16b)",
+           "anxiety attacks (Q16c)",
+           "grinding or clenching teeth (Q16d)",
+           "diarrhoea and/or constipation (Q16e)",
+           "needing help with daily activities (Q16f)",
+           "sensitivity to bright light (Q16g)",
+           "tiring very easily when physically active (Q16h)",
+           "pain all over the body (Q16i)",
+           "headaches (Q16j)",
+           "bladder discomfort and/or burning when urinating (Q16k)",
+           "sleeping poorly (Q16l)",
+           "difficulty concentrating (Q16m)",
+           "skin problems such as dryness, itching or rashes (Q16n)",
+           "stress worsening physical symptoms (Q16o)",
+           "feeling sad or depressed (Q16p)",
+           "having low energy (Q16q)",
+           "muscle tension in neck and shoulders (Q16r)",
+           "jaw pain (Q16s)",
+           "certain smells causing dizziness and nausea (Q16t)",
+           "frequent urination (Q16u)",
+           "restless, uncomfortable legs when falling asleep (Q16v)",
+           "difficulty remembering things (Q16x)",
+           "childhood trauma (Q16y)",
+           "pain in the pelvic region (Q16z)"))),
+
+  tibble(variable = paste0("SCI93_", 1:35),
+         label = paste0("SCI-93 item ", c(letters[1:22], "x", "y", "z", paste0("a", letters[1:10])),
+                        ": everyday life disturbed by ", c(
+           "jaw tension (Q20a)", "muscle pain (Q20b)", "muscle stiffness (Q20c)",
+           "muscle fatigue (Q20d)", "general tiredness (Q20e)", "becoming easily irritated (Q20f)",
+           "tingling sensations in the body (Q20g)", "numbness in arms/hands or legs/feet (Q20h)",
+           "burning skin sensation (Q20i)", "sleep difficulties (Q20j)", "eye irritation (Q20k)",
+           "dry mouth (Q20l)", "hypersensitivity to smells, light and sound (Q20m)",
+           "weather sensitivity (Q20n)", "feeling of swelling in hands/feet (Q20o)",
+           "clumsiness in hands/fingers (Q20p)", "trembling hands (Q20q)", "dizziness (Q20r)",
+           "bowel habits alternating between constipation and loose stools (Q20s)",
+           "worry/restlessness (Q20t)", "occasional itching (Q20u)", "cold hands/feet (Q20v)",
+           "alternating chills and sweating (Q20x)", "frequent need to urinate (Q20y)",
+           "reduced concentration (Q20z)", "impaired memory (Q20aa)",
+           "skin pain on touch (Q20ab)", "boiling sensation in the body (Q20ac)",
+           "reduced appetite (Q20ad)", "feverish feeling without fever (Q20ae)",
+           "palpitations (Q20af)", "chest pressure / heavy breathing (Q20ag)",
+           "frequent headaches (Q20ah)", "changed sexual desire (Q20ai)",
+           "lump-in-the-throat sensation (Q20aj)")))
+)
+
+vvProcessed <- vvProcessed %>%
+  rows_update(vv_translations, by = "variable", unmatched = "ignore")
+
+# Kvitto: originalrader som fortfarande saknar översättning
+vvProcessed %>%
+  filter(is.na(label), !is.na(original_label)) %>%
+  pull(variable)
+```
+
+Finally `vvProcessed`and `vv_derived`are merged into the final variableview file: `vvFinal``
+```{r}
+vvFinal <- bind_rows(vvProcessed, vv_derived) %>% 
+  relocate(variable, label, type, data_type, values, missing, original_label)
+```
+
 ------------------------------------------------------------------------
 
 ## Chapter 12: Merge the dataframes and export the result into an excel file
