@@ -105,7 +105,6 @@ verify_data_requirements(processed, vv)
 
 ------------------------------------------------------------------------
 
-
 ## Chapter 4: Variable Classification
 
 ### Build label table from VariableView
@@ -159,7 +158,6 @@ notExclusive <- labelTable %>%
   pull(base)
 ```
 
-
 ### Build codebook
 
 Creates lookup tables mapping each numeric level to its descriptive label.
@@ -181,7 +179,6 @@ codebook_non_exclusive <- labelTable %>%
 
 ------------------------------------------------------------------------
 
-
 ## Chapter 6: Data adjustments
 
 This chapter corrects known errors tied to specific respondents, identified through manual data review. Each correction is tied to a specific ID and a documented reason. This chapter changes with each new wave of data review — if a new error is found, a new line is added here.
@@ -189,13 +186,14 @@ This chapter corrects known errors tied to specific respondents, identified thro
 It does not handle general format or encoding uncertainties (such as ambiguous date formats); those are addressed defensively in Chapter 8 at the point where each variable is actually used.
 
 ## Personnummer deviations
+
 While not being an actual error as personnummer are actually accepted in differing format lengths, this paper still chooses to standardize all personnummer into the original 12 digit format `YYYYMMDD-XXXX` for the sake of consistency.
 
-Century is inferred for 10-digit values using the same assumption used later in this document for birthyear: 
+Century is inferred for 10-digit values using the same assumption used later in this document for birthyear:
 
 `No respondent is born before 1915`
 
- so `YY >= 15` is assumed to be `19YY`, otherwise `20YY`. All 4 control digits are kept unchanged.
+so `YY >= 15` is assumed to be `19YY`, otherwise `20YY`. All 4 control digits are kept unchanged.
 
 ```{r}
 processed <- processed %>%
@@ -271,8 +269,7 @@ if (any(sex_missing, na.rm = TRUE)) {
 
 All variables are standardized before any derived variables are created in Chapter 8.
 
-The first standardization that is not neccesarily used in the following chapter is that of the respondents personummer. 
-
+The first standardization that is not neccesarily used in the following chapter is that of the respondents personummer.
 
 Two transformations are applied depending on variable type:
 
@@ -841,25 +838,25 @@ Collapses mutually exclusive dummy columns (e.g., VAR04_1, VAR04_2) into a singl
 ```{r}
 collapsing_function <- function(df, codebook) {
   bases <- unique(codebook$base)
-  
+
   for (base_name in bases) {
     cb <- codebook %>%
       filter(base == base_name) %>%
       arrange(sub_index)
-    
-    col_names <- paste0(base_name, "_", cb$sub_index + 1L)
-    
+
+    col_names <- cb$variable
+
     missing_cols <- setdiff(col_names, names(df))
     if (length(missing_cols) > 0) {
-      warning(base_name, ": saknade kolumner – ", paste(missing_cols, collapse = ", "))
+      warning(base_name, ": missing columns - ", paste(missing_cols, collapse = ", "))
       next
     }
-    
+
     if (anyDuplicated(col_names) > 0) {
-      warning(base_name, ": dublettkolumner i codebook, skippar")
+      warning(base_name, ": duplicate columns in codebook, skipping")
       next
     }
-    
+
     result <- apply(df[col_names], 1, function(row) {
       if (any(!is.na(row) & !(row %in% c(0, 1)))) return(-1L)
       hit <- which(row == 1)
@@ -867,12 +864,12 @@ collapsing_function <- function(df, codebook) {
       if (length(hit) == 0) return(NA_integer_)
       return(-1L)
     })
-    
+
     df[[col_names[1]]] <- result
     names(df)[names(df) == col_names[1]] <- base_name
     df[col_names[-1]] <- NULL
   }
-  
+
   df
 }
 ```
