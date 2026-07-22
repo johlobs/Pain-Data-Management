@@ -105,7 +105,7 @@ verify_data_requirements(processed, vv)
 
 ------------------------------------------------------------------------
 
-## Chapter 4: Variable Classification
+## Chapter 3: Variable Classification
 
 ### Build label table from VariableView
 
@@ -179,7 +179,7 @@ codebook_non_exclusive <- labelTable %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 6: Data adjustments
+## Chapter 4: Data adjustments
 
 This chapter corrects known errors tied to specific respondents, identified through manual data review. Each correction is tied to a specific ID and a documented reason. This chapter changes with each new wave of data review — if a new error is found, a new line is added here.
 
@@ -265,7 +265,7 @@ if (any(sex_missing, na.rm = TRUE)) {
 
 ------------------------------------------------------------------------
 
-## Chapter 7: Standardization of values
+## Chapter 5: Standardization of values
 
 All variables are standardized before any derived variables are created in Chapter 8.
 
@@ -301,7 +301,7 @@ processed <- processed %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 8: Formation of new variables
+## Chapter 6: Formation of new variables
 
 This chapter derives all variables ready for analysis from the standardized data. Unlike Chapter 6, corrections here are not tied to specific respondents — they reflect general defensive handling of format and encoding uncertainties that could arise in any data export (e.g. ambiguous date formats, missing values that carry a substantive meaning).
 
@@ -831,7 +831,7 @@ processed$ant_snus[processed$snus < 3] <- 0
 
 ------------------------------------------------------------------------
 
-## Chapter 9: Collapsing exclusive dummies
+## Chapter 7: Collapsing exclusive dummies
 
 Collapses mutually exclusive dummy columns (e.g., VAR04_1, VAR04_2) into a single 0-based categorical column (e.g., VAR04 = 0 or 1). Conflicts, where more than one option is marked, are flagged as **-1** rather than silently dropped as NA, making data errors visible and traceable.
 
@@ -903,7 +903,7 @@ if (any_conflicts) {
 
 ------------------------------------------------------------------------
 
-## Chapter 10: Rename variables and apply labels
+## Chapter 8: Rename variables and apply labels
 
 Raw VAR-style column names are replaced with descriptive names to make the exported dataset self-documenting. Variables that were already created with descriptive names in Chapter 8 (e.g. `had_a`, `BMI`, `pain7days`) do not need renaming here. The 45 body location columns (VAR12) are renamed in bulk using `rename_with`. Variable labels from VariableView are then applied to all remaining columns using the `labelled` package. This will also be the same on the PSQ, CSI and SCI93 questionnaires.
 
@@ -1023,7 +1023,7 @@ final <- final %>%
 
 ------------------------------------------------------------------------
 
-## Chapter 11: Create a new variable view for the dataset
+## Chapter 9: Create a new variable view for the dataset
 
 Now with the data handled, it becomes neccessary to also change the table within which the variables are explained, this table is as shown before known as variable view or vv for short. The process begins with creating the new vv that is to be changed and updated. It will be called processedVV.
 
