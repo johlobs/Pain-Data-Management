@@ -221,40 +221,13 @@ label_table <- tibble(
   mutate(base = sub("_.*", "", variable))
 ```
 
-### Build group summary
-
-```{r}
-group_info <- label_table %>%
-  filter(grepl("^VAR[0-9]+_", variable)) %>%
-  group_by(base) %>%
-  summarise(
-    n_items    = n(),
-    first_type = first(type),
-    question   = sub(" - .*", "", first(label)) %>%
-                 str_replace_all("\\r\\n", " ") %>%
-                 str_trim(),
-    .groups = "drop"
-  ) %>%
-  mutate(class = case_when(
-    base %in% exclusive     ~ "exclusive",
-    base %in% non_exclusive ~ "non_exclusive",
-    base %in% matrix_groups ~ "matrix",
-    TRUE                    ~ "UNCLASSIFIED"
-  ))
-
-exclusive_bases     <- group_info$base[group_info$class == "exclusive"]
-non_exclusive_bases <- group_info$base[group_info$class == "non_exclusive"]
-
-print(as.data.frame(group_info[, c("base", "n_items", "class")]), row.names = FALSE)
-```
-
 ### Build codebook
 
 Creates lookup tables mapping each numeric level to its descriptive label.
 
 ```{r}
 codebook_exclusive <- label_table %>%
-  filter(base %in% exclusive_bases) %>%
+  filter(class == "exclusive") %>%
   mutate(
     sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)) - 1L,
     option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)
@@ -262,78 +235,13 @@ codebook_exclusive <- label_table %>%
   select(base, sub_index, option_label, variable)
 
 codebook_non_exclusive <- label_table %>%
-  filter(base %in% non_exclusive_bases) %>%
+  filter(class == "non_exclusive") %>%
   mutate(option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)) %>%
   select(base, variable, option_label)
 ```
 
 ------------------------------------------------------------------------
 
-## Chapter 5: Verification
-
-This chapter cross-checks the manual classification from Chapter 4 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early, for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
-
-`verify_classification()` takes the `group_info` table built in Chapter 4 and runs five checks:
-
-1.  **Unclassified variables** — any `VARnn` base that does not appear in `exclusive`, `non_exclusive`, or `matrix_groups`.
-2.  **Exclusive classified as Matrix in VariableView** — the Type column in VariableView says "Matrix" but the variable is in the `exclusive` vector.
-3.  **Exclusive with "Flera alternativ" in label** — the question label suggests multiple answers are allowed, which contradicts exclusive classification.
-4.  **Matrix classified as Check Boxes in VariableView** — the Type column says "Check Boxes" (i.e. non-exclusive) but the variable is in `matrix_groups`.
-5.  **Exclusive with more than 11 sub-items** — a single-select question rarely has more than 11 options; a high count may indicate a misclassification.
-
-Issues are printed to the console but do not stop the script, so all checks run regardless. The function returns the warning messages invisibly so they can be captured programmatically if needed.
-
-```{r}
-verify_classification <- function(group_info) {
-  warnings <- character(0)
-
-  uncl <- filter(group_info, class == "UNCLASSIFIED")
-  if (nrow(uncl) > 0)
-    warnings <- c(warnings, paste0(
-      "UNCLASSIFIED groups (add to one of the three vectors): ",
-      paste(uncl$base, collapse = ", ")))
-
-  matrix_as_excl <- filter(group_info, class == "exclusive",
-                            grepl("Matrix", first_type, ignore.case = TRUE))
-  if (nrow(matrix_as_excl) > 0)
-    warnings <- c(warnings, paste0(
-      "Classified as exclusive but VariableView Type is Matrix: ",
-      paste(matrix_as_excl$base, collapse = ", ")))
-
-  excl_multi <- filter(group_info, class == "exclusive",
-                       grepl("[Ff]lera alternativ", question))
-  if (nrow(excl_multi) > 0)
-    warnings <- c(warnings, paste0(
-      "Classified as exclusive but label says 'Flera alternativ': ",
-      paste(excl_multi$base, collapse = ", ")))
-
-  cb_as_matrix <- filter(group_info, class == "matrix",
-                          grepl("Check Boxes", first_type, ignore.case = TRUE))
-  if (nrow(cb_as_matrix) > 0)
-    warnings <- c(warnings, paste0(
-      "Classified as matrix but VariableView Type is Check Boxes: ",
-      paste(cb_as_matrix$base, collapse = ", ")))
-
-  many_excl <- filter(group_info, class == "exclusive", n_items > 11)
-  if (nrow(many_excl) > 0)
-    warnings <- c(warnings, paste0(
-      "Exclusive with >11 sub-items (verify single-select): ",
-      paste(many_excl$base, " (", many_excl$n_items, ")", sep = "", collapse = ", ")))
-
-  if (length(warnings) == 0) {
-    cat("Verification passed: no issues found.\n")
-  } else {
-    cat("Verification warnings:\n")
-    for (w in warnings) cat("  !", w, "\n")
-  }
-
-  invisible(warnings)
-}
-
-verify_classification(group_info)
-```
-
-------------------------------------------------------------------------
 
 ## Chapter 6: Data adjustments
 
