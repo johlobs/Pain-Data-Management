@@ -20,6 +20,8 @@ The pipeline is built on three principles:
 
 ## Chapter 1: Initialization
 
+The initialization phase of this document is used to just load all the libraries that are required to use it, these need to be pre-downloaded on the hardware that runs this qmd.
+
 ```{r}
 library(tidyverse)
 library(readxl)
@@ -142,7 +144,7 @@ Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigne
 | **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
 | **matrix** | Independent sub-items with own scale | Left unchanged |
 
-Classification is based on `PainSensPROM_Baseline_DataManagement.docx` and verified against `Enkät_T1a_Gen_230102.pdf`. To reclassify a variable, move it between the three vectors below.
+Classification is based on `PainSensPROM_Baseline_DataManagement.docx` and verified against `Enkät_T1a_Gen_230102.pdf`. If a variable is wished to be reclassified it can be moved into another vector.
 
 ```{r}
 exclusive <- c(
@@ -204,6 +206,8 @@ matrix_groups <- c(
 ```
 
 ### Build label table from VariableView
+
+Using the incoming VariableView, a label table is obtained which is used to
 
 ```{r}
 label_table <- tibble(
@@ -267,7 +271,7 @@ codebook_non_exclusive <- label_table %>%
 
 ## Chapter 5: Verification
 
-This chapter cross-checks the manual classification from Chapter 4 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early — for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
+This chapter cross-checks the manual classification from Chapter 4 against the metadata in VariableView before any data is touched. The goal is to catch mismatches early, for example, a variable manually classified as *exclusive* (single-select) that VariableView records as a matrix, or a variable that has been added to the survey but not yet assigned to any class.
 
 `verify_classification()` takes the `group_info` table built in Chapter 4 and runs five checks:
 
@@ -364,7 +368,7 @@ if (sum(processed$VAR07_flag, na.rm = TRUE) > 0) {
 
 ### Sex imputation from personnummer
 
-VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for men and even for women.
+VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for males and even for females.
 
 `pnr` was standardized to a consistent 12-digit format in Chapter 3 and is reused here and in Chapter 8 to derive birth year.
 
@@ -566,7 +570,7 @@ processed$chronic_pain <- case_when(
 | 0     | VAR16_5    | Seldom / not at all in the past 12 months |
 
 ```{r}
-processed$persistent <- processed$VAR18_2  # 0 = periodisk, 1 = ihållande
+processed$persistent <- processed$VAR18_2  # 0 = periodic, 1 = persistent
 
 processed$pain_freq <- rowSums(processed[, paste0("VAR16_", 1:5)] * 4:0)
 ```
@@ -1532,7 +1536,7 @@ The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with t
  addWorksheet(wb, "VariableView")
  writeData(wb, "VariableView", vvFinal)
 
- export_path <- here::here("docs", "PainSense_processed_data.xlsx")
+ export_path <- here::here("docs", "PainSense_wrangled_data.xlsx")
  saveWorkbook(wb, export_path, overwrite = TRUE)
 
  cat(sprintf("Exported %d rows and %d variables to %s\n",
