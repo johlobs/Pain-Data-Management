@@ -108,81 +108,12 @@ verify_data_requirements(processed, vv)
 
 ## Chapter 4: Variable Classification
 
-Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
-
-| Class | Description | Processing |
-|------------------------|------------------------|------------------------|
-| **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
-| **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
-| **matrix** | Independent sub-items with own scale | Left unchanged |
-
-Classification is based on `PainSensPROM_Baseline_DataManagement.docx` and verified against `Enkät_T1a_Gen_230102.pdf`. If a variable is wished to be reclassified it can be moved into another vector.
-
-```{r}
-exclusive <- c(
-  "VAR04",  # Q1a  juridiskt kön: Man / Kvinna
-  "VAR05",  # Q1b  könsidentitet: Man / Kvinna / Annat
-  "VAR08",  # Q4   utbildning
-  "VAR09",  # Q5   födelseland
-  "VAR11",  # Q7a  smärta senaste 7 dagar: Ja / Nej
-  "VAR13",  # Q7c  NRS medel 7d (0–10)
-  "VAR14",  # Q8   NRS vila 7d (0–10)
-  "VAR15",  # Q9   NRS rörelse 7d (0–10)
-  "VAR16",  # Q10  smärtfrekvens (5 alternativ)
-  "VAR17",  # Q11  smärtduration (5 alternativ)
-  "VAR18",  # Q12  periodisk / ihållande (2 alternativ)
-  "VAR25",  # Q19a HAD – ångest
-  "VAR26",  # Q19b HAD – depression
-  "VAR27",  # Q19c HAD – ångest
-  "VAR28",  # Q19d HAD – depression
-  "VAR29",  # Q19e HAD – ångest
-  "VAR30",  # Q19f HAD – depression
-  "VAR31",  # Q19g HAD – ångest
-  "VAR32",  # Q19h HAD – depression
-  "VAR33",  # Q19i HAD – ångest
-  "VAR34",  # Q19j HAD – depression
-  "VAR35",  # Q19k HAD – ångest
-  "VAR36",  # Q19l HAD – depression
-  "VAR37",  # Q19m HAD – ångest
-  "VAR38",  # Q19n HAD – depression
-  "VAR41",  # Q23  ISI – nöjd sömnmönster
-  "VAR42",  # Q24  ISI – funktionsförmåga
-  "VAR43",  # Q25  ISI – livskvalitet
-  "VAR44",  # Q26  ISI – bekymrad sömn
-  "VAR45",  # Q27  tid fysisk träning/vecka (6 alternativ)
-  "VAR46",  # Q28  dagar fysisk träning (0–7)
-  "VAR47",  # Q29  tid vardagsmotion/vecka (7 alternativ)
-  "VAR48",  # Q30  dagar vardagsmotion (0–7)
-  "VAR49",  # Q31a rökning (4 alternativ)
-  "VAR50",  # Q31b antal cigaretter/dag (3 alternativ)
-  "VAR51",  # Q32a snus (4 alternativ)
-  "VAR52",  # Q32b antal dosor/vecka (3 alternativ)
-  "VAR53"   # Q33  kontakt framtida studier: Ja / Nej
-)
-
-non_exclusive <- c(
-  "VAR12",  # Q7b  smärtlokalisationer (45 kroppsregioner, flera möjliga)
-  "VAR20"   # Q14  behandlingsåtgärder (flera möjliga)
-)
-
-matrix_groups <- c(
-  "VAR10",  # Q6   arbetslivssituation (25/50/75/100 % per rad)
-  "VAR19",  # Q13  smärtläkemedel (fritext per rad)
-  "VAR21",  # Q15  PSQ smärtkänslighet (0–10 per item)
-  "VAR22",  # Q16  CSI del A (1–5 per item)
-  "VAR23",  # Q17  CSI del B diagnoser (Nej/Ja per diagnos)
-  "VAR24",  # Q18  sjukdomar/skador (Ja/Nej per sjukdom)
-  "VAR39",  # Q20–21 SCI-93 (1–5 per item)
-  "VAR40"   # Q22  sömnproblem ISI (1–5 per item)
-)
-```
-
 ### Build label table from VariableView
 
 Using the incoming VariableView, a label table is obtained which is used to
 
 ```{r}
-label_table <- tibble(
+labelTable <- tibble(
   variable  = vv[["Variable Name"]],
   label     = vv[["Label"]],
   type      = vv[["Type"]],
@@ -193,21 +124,57 @@ label_table <- tibble(
   mutate(base = sub("_.*", "", variable))
 ```
 
+Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigned to one of three classes:
+
+| Class | Description | Processing |
+|------------------------|------------------------|------------------------|
+| **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
+| **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
+| **matrix** | Independent sub-items with own scale | Left unchanged |
+
+Classification is based on `PainSensPROM_Baseline_DataManagement.docx` and verified against `Enkät_T1a_Gen_230102.pdf`. If a variable is wished to be reclassified it can be moved into another vector.
+
+### Create vectors grouped by category so that it either is `exclusive` or `notExclusive`
+
+```{r}
+exemptExclusive <- c("VAR12", "VAR20")
+
+exclusive <- labelTable %>%
+  filter(
+    type == "Multiple-Choice - Check Boxes",
+    grepl("^VAR[0-9]+_", `variable`),
+    `variable` %in% names(processed)
+  ) %>%
+  mutate(base = sub("_.*", "", `variable`)) %>%
+  distinct(base) %>%
+  filter(!base %in% exemptExclusive) %>%
+  pull(base)
+
+notExclusive <- labelTable %>%
+  filter(
+    grepl("^VAR[0-9]+_", variable),
+    type != "Multiple-Choice - Check Boxes" | base %in% exemptExclusive
+  ) %>%
+  distinct(base) %>%
+  pull(base)
+```
+
+
 ### Build codebook
 
 Creates lookup tables mapping each numeric level to its descriptive label.
 
 ```{r}
-codebook_exclusive <- label_table %>%
-  filter(class == "exclusive") %>%
+codebook_exclusive <- labelTable %>%
+  filter(base %in% exclusive) %>%
   mutate(
     sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)) - 1L,
     option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)
   ) %>%
   select(base, sub_index, option_label, variable)
 
-codebook_non_exclusive <- label_table %>%
-  filter(class == "non_exclusive") %>%
+codebook_non_exclusive <- labelTable %>%
+  filter(base %in% exemptExclusive) %>%
   mutate(option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)) %>%
   select(base, variable, option_label)
 ```
