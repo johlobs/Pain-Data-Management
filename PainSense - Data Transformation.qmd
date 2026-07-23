@@ -109,7 +109,7 @@ verify_data_requirements(processed, vv)
 
 ### Build label table from VariableView
 
-Using the incoming VariableView, a label table is obtained which is used to
+Using the loaded VariableView, a label table is made which has some modifications to it that makes it easier to utilize later on in the coding
 
 ```{r}
 labelTable <- tibble(
@@ -160,7 +160,7 @@ notExclusive <- labelTable %>%
 
 ### Build codebook
 
-Creates lookup tables mapping each numeric level to its descriptive label.
+Using the `labelTable` together with the vectors (`exclusive`, `exemptExclusive` and `notExclusive`), codebooks can be built which will be necessary in identifying which class each variable belongs to the coming data manipulation.
 
 ```{r}
 codebook_exclusive <- labelTable %>%
