@@ -185,7 +185,7 @@ This chapter corrects known errors tied to specific respondents, identified thro
 
 It does not handle general format or encoding uncertainties (such as ambiguous date formats); those are addressed defensively in Chapter 8 at the point where each variable is actually used.
 
-## Personnummer deviations
+### Personnummer deviations
 
 While not being an actual error as personnummer are actually accepted in differing format lengths, this paper still chooses to standardize all personnummer into the original 12 digit format `YYYYMMDD-XXXX` for the sake of consistency.
 
@@ -200,13 +200,14 @@ processed <- processed %>%
   mutate(
     pnr_len = nchar(VAR02),
     pnr_yy  = as.integer(substr(VAR02, 1, 2)),
+    pnr_cutoff = year(Sys.Date()) - 2011
     VAR02   = case_when(
       pnr_len == 12 ~ VAR02,
-      pnr_len == 10 ~ paste0(if_else(pnr_yy >= 15L, "19", "20"), VAR02),
+      pnr_len <= 10 ~ paste0(if_else(pnr_yy >= pnr_cutoff, "19", "20"), VAR02),
       TRUE          ~ NA_character_
     )
   ) %>%
-  select(-pnr_len, -pnr_yy)
+  select(-pnr_len, -pnr_yy -pnr_cutoff)
 
 pnr <- processed$VAR02
 
@@ -216,6 +217,35 @@ cat(sprintf(
 ))
 ```
 
+### Sex imputation from personnummer
+
+VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for males and even for females.
+
+`pnr` was standardized to a consistent 12-digit format in Chapter 3 and is reused here and in Chapter 8 to derive birth year.
+
+Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 7 recodes 2 → 0. Assigning 1 here means "this option was selected".
+
+```{r}
+processed <- processed %>%
+  mutate(
+    pnr_ok    = !is.na(VAR02) & nchar(VAR02) == 12,
+    sex_digit = if_else(pnr_ok, as.integer(substr(VAR02, 11, 11)), NA_integer_),
+    sex_valid = coalesce((VAR04_1 == 1 & VAR04_2 == 2) |
+                         (VAR04_1 == 2 & VAR04_2 == 1), FALSE),
+    do_impute = pnr_ok & !sex_valid & !is.na(sex_digit),
+    VAR04_1   = case_when(
+      do_impute & sex_digit %% 2 == 1 ~ 1,   # odd  -> male
+      do_impute & sex_digit %% 2 == 0 ~ 2,   # even -> not male
+      TRUE                            ~ VAR04_1
+    ),
+    VAR04_2   = case_when(
+      do_impute & sex_digit %% 2 == 1 ~ 2,   # odd  -> not female
+      do_impute & sex_digit %% 2 == 0 ~ 1,   # even -> female
+      TRUE                            ~ VAR04_2
+    )
+  ) %>%
+  select(-pnr_ok, -sex_digit, -sex_valid, -do_impute)
+```
 ------------------------------------------------------------------------
 
 ### Data entry errors
@@ -240,26 +270,6 @@ processed$VAR07_flag <- if_else(!is.na(processed$VAR07) & processed$VAR07 > 200,
 if (sum(processed$VAR07_flag, na.rm = TRUE) > 0) {
   cat(sprintf("WEIGHT FLAG: %d respondent(s) with VAR07 > 200 kg - review manually.\n",
               sum(processed$VAR07_flag, na.rm = TRUE)))
-}
-```
-
-### Sex imputation from personnummer
-
-VAR04 (legal sex) is missing for some respondents. It is imputed from the personnummer (VAR02): in the Swedish personal number, the second-to-last digit is odd for males and even for females.
-
-`pnr` was standardized to a consistent 12-digit format in Chapter 3 and is reused here and in Chapter 8 to derive birth year.
-
-Note: VAR04_1 and VAR04_2 are assigned using the raw 1/2 coding (1 = selected, 2 = not selected) because Chapter 7 recodes 2 → 0. Assigning 1 here means "this option was selected".
-
-```{r}
-sex_digit <- as.integer(substr(pnr, nchar(pnr) - 1, nchar(pnr) - 1))
-is_woman  <- sex_digit %% 2 == 0
-
-sex_missing <- (processed$VAR04_1 != 1 & processed$VAR04_2 != 1) |
-               (is.na(processed$VAR04_1) & is.na(processed$VAR04_2))
-if (any(sex_missing, na.rm = TRUE)) {
-  processed$VAR04_1[sex_missing] <- if_else(is_woman[sex_missing], 2, 1)
-  processed$VAR04_2[sex_missing] <- if_else(is_woman[sex_missing], 1, 2)
 }
 ```
 
@@ -1405,7 +1415,7 @@ vvFinal <- bind_rows(vvProcessed, vv_derived) %>%
 The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with two sheets: **Data** (one row per respondent) and **Codebook** (variable labels and response options). The `docs/` folder is excluded from version control since it may contain personal data.
 
 ```{r}
- dir.create(here::here("docs"), showWarnings = FALSE)
+ dir.create(here("docs"), showWarnings = FALSE)
 
  wb <- createWorkbook()
 
@@ -1415,7 +1425,7 @@ The processed dataset is exported to `docs/PainSense_processed_data.xlsx` with t
  addWorksheet(wb, "VariableView")
  writeData(wb, "VariableView", vvFinal)
 
- export_path <- here::here("docs", "PainSense_wrangled_data.xlsx")
+ export_path <- here("docs", "PainSense_wrangled_data.xlsx")
  saveWorkbook(wb, export_path, overwrite = TRUE)
 
  cat(sprintf("Exported %d rows and %d variables to %s\n",
