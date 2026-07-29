@@ -36,7 +36,7 @@ File paths are resolved with `here::here()` rather than a hardcoded working dire
 The Excel file has two sheets: **VariableView** (codebook with variable names, labels, types, and value codes) and **Data** (one row per respondent).
 
 ```{r}
-filepath <- here::here("NULLdata_MenWomen_Baseline_Facebook_250401.xlsx")
+filepath <- here("NULLdata_MenWomen_Baseline_Facebook_250401.xlsx")
 vv        <- read_excel(filepath, sheet = "VariableView")
 processed <- read_excel(filepath, sheet = "Data")
 ```
@@ -127,54 +127,51 @@ Variables with pattern `VARnn_mm` are grouped by base name (`VARnn`) and assigne
 
 | Class | Description | Processing |
 |------------------------|------------------------|------------------------|
-| **exclusive** | Single-select (radio button) | Collapsed to one numeric column |
-| **non_exclusive** | Multi-select (checkbox) | Kept as binary 0/1 columns |
-| **matrix** | Independent sub-items with own scale | Left unchanged |
+| **exclusive** | Single-select (radio button), only one option can be chosen making the choice exclusive | Collapsed to one numeric column |
+| **exemptExclusive** | Same mechanism as above yet possible to select multiple which makes them exempt from being exclusive | Kept as binary 0/1 columns to not lose information |
+| **matrix** | Independent sub-items with own scale | Untouched by the collapsing function |
 
 Classification is based on `PainSensPROM_Baseline_DataManagement.docx` and verified against `Enkät_T1a_Gen_230102.pdf`. If a variable is wished to be reclassified it can be moved into another vector.
 
-### Create vectors grouped by category so that it either is `exclusive` or `notExclusive`
+### Create a new dataframe from `labelTable` called `subItems` where each variable is assigned to their specific group 
 
 ```{r}
-exemptExclusive <- c("VAR12", "VAR20")
 
-exclusive <- labelTable %>%
-  filter(
-    type == "Multiple-Choice - Check Boxes",
-    grepl("^VAR[0-9]+_", `variable`),
-    `variable` %in% names(processed)
-  ) %>%
-  mutate(base = sub("_.*", "", `variable`)) %>%
-  distinct(base) %>%
-  filter(!base %in% exemptExclusive) %>%
-  pull(base)
+exemptBases <- c("VAR12", "VAR20")
 
-notExclusive <- labelTable %>%
-  filter(
-    grepl("^VAR[0-9]+_", variable),
-    type != "Multiple-Choice - Check Boxes" | base %in% exemptExclusive
-  ) %>%
-  distinct(base) %>%
-  pull(base)
+subItems <- labelTable %>%
+  filter(grepl("^VAR[0-9]+_", variable), variable %in% names(processed)) %>%
+  mutate(class = case_when(
+    base %in% exemptBases                  ~ "exemptExclusive",
+    type == "Multiple-Choice - Check Boxes" ~ "exclusive",
+    .default                                = "matrix"
+  ))
 ```
 
 ### Build codebook
 
-Using the `labelTable` together with the vectors (`exclusive`, `exemptExclusive` and `notExclusive`), codebooks can be built which will be necessary in identifying which class each variable belongs to the coming data manipulation.
+Using the `subItems` df, create 2 codebooks, `codeBooksExclusive` which is made up of the exclusive items in `subItems` and `codebookNotExclusive` which is made up of both `exempt` and `matrix` variables
 
 ```{r}
-codebook_exclusive <- labelTable %>%
-  filter(base %in% exclusive) %>%
+clean_label <- function(x) sub("^.* - ", "", str_replace_all(x, "\\r\\n", " "))
+
+codebookExclusive <- subItems %>%
+  filter(class == "exclusive") %>%
   mutate(
     sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)) - 1L,
-    option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)
+    option_label = clean_label(label)
   ) %>%
   select(base, sub_index, option_label, variable)
 
-codebook_non_exclusive <- labelTable %>%
-  filter(base %in% exemptExclusive) %>%
-  mutate(option_label = str_replace_all(label, "\\r\\n", " ") %>% sub("^.* - ", "", .)) %>%
-  select(base, variable, option_label)
+codebookNotExclusive <- subItems %>%
+  filter(class != "exclusive") %>%
+  mutate(
+    sub_index    = as.integer(sub("^VAR[0-9]+_", "", variable)),
+    option_label = clean_label(label)
+  ) %>%
+  select(base, variable, class, sub_index, option_label)
+
+rm(exemptBases, subItems, clean_label)
 ```
 
 ------------------------------------------------------------------------
@@ -246,6 +243,7 @@ processed <- processed %>%
   ) %>%
   select(-pnr_ok, -sex_digit, -sex_valid, -do_impute)
 ```
+
 ------------------------------------------------------------------------
 
 ### Data entry errors
@@ -887,7 +885,7 @@ collapsing_function <- function(df, codebook) {
 All exclusively coded variable groups listed below are collapsed. The resulting single column contains the 0-based index of the selected option, which can be used for descriptive purposes. HAD variables (VAR25–38) are also included here; their collapsed values (0–3) represent the selected response option, while the scored subscales `had_a` and `had_d` from Chapter 8 are used for analysis.
 
 ```{r}
-processed <- collapsing_function(processed, codebook_exclusive)
+processed <- collapsing_function(processed, codebookExclusive)
 ```
 
 ### Data verification — conflict check
