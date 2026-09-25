@@ -1,0 +1,604 @@
+---
+title: "PainSense Data Cleaning"
+format: html
+editor: visual
+engine: knitr
+---
+
+## To do:
+
+[X] (klar 2026-09-25) Hitta annan lösning för cleanade versioner av drug, dosage och strength (finns 10 ifyllningsbara fällt). Löst: VAR19 rensas direkt i df_clean och jämförs mot df_raw med comparison().
+
+[X] (klar 2026-09-25) Hitta smidig återanvändningsbar lösnning där jag kan flytta information från en kolumn till en annan. t.ex när någon skrivit in både dosage och strength i samma cell. då kan delar av informationen behöva flyttas till den andra kolumnen, och då behöver jag manuellt välja vad som ska stå i respektive kolumn. Resultatet ska kunna presenteras i en comparison tabell, för att hålla koll på hur långt cleaning har kommit, och som referens så att allt blir korrekt. Löst: set_medication() och comparison().
+
+[X] (klar 2026-09-25) Uppdatera datafilen med simulerade datan, så att den innehåller samma fel som jag beskriver att jag stöter på när jag kör koden på den riktiga datan.
+
+[X] (klar 2026-09-25) Kör data cleaning på den simulerade datan.
+
+[X] (klar 2026-09-25) Lägg över mg som är i VAR_19_1_X kolumnen till strengthkolumnen (automatisera efter form, om värdet är siffra och sedan mg), gör bara om strength är NA (där denna drug. det måste kopplas mellan drug 1, 2, osv upp till 10 läkemedel). Löst: move_mg_to_strength(), gäller även g.
+
+[X] (klar 2026-09-25) Se till att variabelnamn inte döps om, det ska göras först i data transformationscriptet.
+
+[X] (klar 2026-09-25) En person har ett extremvärde för vikt. Sätt som NA. Löst: 995 sätts till NA som regel.
+
+Avvakta med att cleana resten av strength och dosagre. Fokusera på läkemedelssort (drug).
+
+[ ] I första hand se till att det finns ett main script som först kallar på cleaning, och sedan transformation. main.R finns, men transformationen läser ännu inte df_clean (A1 i ATT_GÖRA.txt).
+
+[ ] Ersätt platshållarna med riktiga värden i TRE: sökvägen på raden data_file, drug_lookup, reglerna för dosering ("fritext") och för styrka.
+
+## Step 0: Troubleshooting routine
+
+**Updated 2026-09-25:** New section.
+
+Run this first, every time. It stops with a clear message if something in the setup is wrong, before any data is touched:
+
+1. Removes old data objects from earlier runs, so an old version of e.g. df_raw is never used by mistake.
+2. Checks that all packages are installed, and loads them.
+3. Checks that the data file exists. **In the TRE, change the path on the `data_file` line.**
+4. Prints R version, package versions and the data file, so you can see what is being used.
+
+```{r}
+# 1. Remove old data objects from earlier runs
+rm(list = intersect(c("df_raw", "df_char", "df_clean", "col_names", "meds"), ls()))
+
+# 2. Packages
+needed_packages  <- c("readr", "dplyr", "stringr", "ggplot2")
+missing_packages <- needed_packages[!sapply(needed_packages, requireNamespace, quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Package(s) not installed: ", paste(missing_packages, collapse = ", "))
+}
+
+library(readr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+# 3. Data file
+# TRE: change this path to the real data file
+data_file <- "C:/Users/nepet/Documents/Data Management Sahlgrenska Academy/Testfile.csv"
+if (!file.exists(data_file)) {
+  stop("Data file not found: ", data_file, "\nCheck the path on the data_file line.")
+}
+
+# 4. What is being used
+cat("R version:  ", R.version.string, "\n")
+cat("Packages:   ", paste(needed_packages, sapply(needed_packages, function(p) as.character(packageVersion(p)))), "\n")
+cat("Data file:  ", data_file, "\n")
+cat("Setup OK.\n")
+```
+
+## Step 1: Read in Data Frame
+
+```{r}
+# Read everything in file as text
+df_raw <- read_delim(
+  file = data_file,
+  delim = ";",
+  locale = locale(encoding = "WINDOWS-1252"),
+  col_types = cols(.default = col_character()))
+
+if (nrow(problems(df_raw)) > 0) {
+  stop(
+    "Something is wrong with the file's structure, not just a column's format.\n\n",
+    "This check reads every column as plain text, which should never fail on\n",
+    "its own - text accepts any value. Getting parsing problems here means the\n",
+    "file itself is malformed in some way.\n\n",
+    "Likely causes:\n",
+    "  - The delimiter (';') doesn't match what the file actually uses\n"
+  )
+}
+
+col_names <- names(df_raw)
+```
+
+Check that the raw data has what the rest of the script needs. Stops with a clear message if not.
+
+```{r}
+expected_cols <- c("ID", "VAR02", "VAR06", "VAR07", paste0("VAR19_", rep(1:10, each = 3), "_", 1:3))
+missing_cols  <- setdiff(expected_cols, names(df_raw))
+
+if (nrow(df_raw) == 0)          stop("df_raw has no rows. Check the data file.")
+if (length(missing_cols) > 0)   stop("Missing column(s) in df_raw: ", paste(missing_cols, collapse = ", "))
+if (anyDuplicated(df_raw$ID) > 0) stop("df_raw has duplicate IDs.")
+
+cat("Raw data OK:", nrow(df_raw), "rows,", ncol(df_raw), "columns, all expected columns found.\n")
+```
+
+## Step 2: Convert and Validate Column Types
+
+```{r}
+character_cols <- c(
+  grep("^VAR19_", col_names, value = TRUE),
+  "VAR02", "VAR20_4", "VAR20_7", "Svarstillfälle", "VAR00"
+)
+
+double_cols <- c("VAR07")
+
+integer_cols <- setdiff(col_names, c(character_cols, double_cols))
+```
+
+### Conversion helpers
+
+**Updated 2026-09-25:** Changed: `clean_and_convert_integer()` now also stops on values that are not whole numbers (e.g. "2,5"), instead of cutting them to 2 without warning.
+
+```{r}
+
+clean_and_convert_double <- function(col_name) {
+  cleaned <- gsub("\u00A0", " ", df_raw[[col_name]])
+  cleaned <- trimws(cleaned)
+  cleaned <- str_replace(cleaned, ",", ".")
+  converted <- suppressWarnings(as.double(cleaned))
+
+  original_missing <- is.na(df_raw[[col_name]]) | cleaned == ""
+  bad_rows <- which(is.na(converted) & !original_missing)
+
+  list(converted = converted, bad_rows = bad_rows)
+}
+
+clean_and_convert_integer <- function(col_name) {
+  cleaned <- gsub("\u00A0", " ", df_raw[[col_name]])
+  cleaned <- trimws(cleaned)
+  cleaned <- str_replace(cleaned, ",", ".")
+  converted <- suppressWarnings(as.integer(cleaned))
+
+  # as.integer() cuts decimals without warning ("2.5" becomes 2), so a value
+  # that is not a whole number is also counted as bad ("2,00" is fine)
+  as_number <- suppressWarnings(as.double(cleaned))
+  not_whole <- !is.na(as_number) & as_number != round(as_number)
+
+  original_missing <- is.na(df_raw[[col_name]]) | cleaned == ""
+  bad_rows <- which((is.na(converted) & !original_missing) | not_whole)
+
+  list(converted = converted, bad_rows = bad_rows)
+}
+
+```
+
+### Diagnostic helpers
+
+```{r}
+# Diagnistic: Inspect exact row/values for one column. 
+find_bad_values <- function(col_name) {
+  result <- if (col_name %in% double_cols) {
+    clean_and_convert_double(col_name)
+  } else {
+    clean_and_convert_integer(col_name)
+  }
+  list(
+    column = col_name,
+    n_bad  = length(result$bad_rows),
+    rows   = result$bad_rows,
+    values = df_raw[[col_name]][result$bad_rows]
+  )
+}
+
+# Diagnostic: Scan all integer columns, report counts only 
+check_all_integer_cols <- function(cols) {
+  counts <- sapply(cols, function(col_name) length(clean_and_convert_integer(col_name)$bad_rows))
+  counts[counts > 0]
+}
+
+inspect_value <- function(col_name, row) {
+  value <- df_raw[[col_name]][row]
+  list(
+    nchar    = nchar(value),
+    n_commas = str_count(value, ",")
+  )
+}
+```
+
+### Running the conversion
+
+**Updated 2026-09-25:** Changed: the summary message at the end now says clearly that the conversion finished without errors.
+
+```{r}
+df_clean <- df_raw
+
+# Run the conversion for integer 
+for (col in integer_cols) {
+  result <- clean_and_convert_integer(col)
+
+  if (length(result$bad_rows) > 0) {
+    stop(sprintf(
+      "Column '%s': %d value(s) could not be converted to integer. Run find_bad_values('%s') to inspect.",
+      col, length(result$bad_rows), col))
+  }
+
+  df_clean[[col]] <- result$converted
+}
+
+# Run the conversion for double 
+for (col in double_cols) {
+  result <- clean_and_convert_double(col)
+
+  if (length(result$bad_rows) > 0) {
+    stop(sprintf(
+      "Column '%s' in df_raw: %d value(s) could not be converted to double. Run find_bad_values('%s') to inspect.",
+      col, length(result$bad_rows), col))
+  }
+
+  df_clean[[col]] <- result$converted
+}
+
+# Only reached if every column converted without errors (otherwise stop() above)
+cat(sprintf("Conversion finished without errors: %d columns converted to integer, %d to double, %d kept as character.\n",
+            length(integer_cols), length(double_cols), length(character_cols)))
+```
+
+# Look at columns together with ID
+
+**Updated 2026-09-25:** New section.
+
+`look()` prints ID together with the columns you choose from df_clean, side by side in the Console, so you can read the values while writing code. Rows where all the chosen columns are empty are left out. Add `all = TRUE` to include the empty rows. All columns are always shown, and the first 20 rows. Add e.g. `n = 50` to see more rows.
+
+`find_med()` prints ID, medication number, drug, dosage and strength side by side, one row per person and medication, for all 10 medications. Without a search word it shows every filled in medication. With a search word, e.g. a drug name, it shows only the hits. Upper and lower case do not matter, and part of a word is enough ("alved" finds "Alvedon"). All columns are always shown, and the first 20 rows. Add e.g. `n = 50` to see more rows. It searches df_clean by default. Add `data = df_raw` to search the raw data instead, e.g. for a name that has already been translated in df_clean.
+
+```{r}
+look <- function(..., all = FALSE, n = 20) {
+  out <- select(df_clean, ID, ...)
+  if (!all) out <- filter(out, if_any(-ID, function(x) !is.na(x)))
+  print(out, n = n, width = Inf)
+}
+```
+
+# Find medication
+
+```{r}
+find_med <- function(text = NA, data = df_clean, n = 20) {
+  hits <- list()
+  for (k in 1:10) {
+    col <- paste0("VAR19_", k, "_", 1:3)   # drug, dosage, strength
+    if (is.na(text)) {
+      # No search word: every filled in medication
+      rows <- which(!is.na(data[[col[1]]]) | !is.na(data[[col[2]]]) | !is.na(data[[col[3]]]))
+    } else {
+      rows <- which(str_detect(data[[col[1]]], regex(text, ignore_case = TRUE)) |
+                    str_detect(data[[col[2]]], regex(text, ignore_case = TRUE)) |
+                    str_detect(data[[col[3]]], regex(text, ignore_case = TRUE)))
+    }
+    hits[[k]] <- tibble(ID = data$ID[rows], med = k,
+                        drug     = data[[col[1]]][rows],
+                        dosage   = data[[col[2]]][rows],
+                        strength = data[[col[3]]][rows])
+  }
+  out <- arrange(bind_rows(hits), as.numeric(ID), med)
+  cat(nrow(out), "row(s)\n")
+  print(out, n = n, width = Inf)
+}
+```
+
+```{r}
+# Examples
+look(VAR19_1_1, VAR19_1_2, VAR19_1_3)             # rows with medication 1 filled in
+look(VAR19_1_1, VAR19_1_2, VAR19_1_3, all = TRUE) # all rows
+find_med()                                        # all medications: ID, drug, dosage, strength
+find_med("alvedon")                               # only hits for Alvedon, in all 10 medications
+find_med("alvedon", data = df_raw)                # search the raw data instead
+```
+
+# Clean personal numbers
+
+**Updated 2026-09-25:** Fixed: removes ",00" at the end, not "00". Removing "00" left a comma behind and shortened real personal numbers ending in 00.
+
+The script for data transformation will convert so that all personal numbers start with either 20 (born 2000 or later) or 19 (born 1999 or earlier).
+
+```{r}
+df_clean <- df_clean %>%
+  mutate(VAR02 = str_remove(VAR02, ",00$"))
+```
+
+# Clean weight
+
+```{r}
+ggplot(df_clean, aes(x = VAR07)) +
+  geom_bar(width = 10) + 
+  scale_x_continuous(breaks = seq(min(df_clean$VAR07, na.rm = TRUE), 
+                                  max(df_clean$VAR07, na.rm = TRUE), 
+                                  by = 10)) + 
+  labs(x = "Weight", y = "Count", title = "Distribution of weight")
+
+```
+
+995 in the weight field is not a real weight. It has been used as a missing code, even though the survey's registered missing code is 999 and VAR07 has no missing code in VariableView. It is therefore set to NA, for every person with this value.
+
+```{r}
+# 995 has been used (incorrectly) as a missing code for weight
+df_clean$VAR07[df_clean$VAR07 == 995] <- NA
+```
+
+# Just a check
+
+**Updated 2026-09-25:** Changed: shows the unique values over all 10 medications, not only medication 1.
+
+```{r}
+# All different values, over all 10 medications
+# _1 = drug, _2 = dosage, _3 = strength
+sort(unique(unlist(select(df_clean, matches("^VAR19_[0-9]+_1$")))))
+sort(unique(unlist(select(df_clean, matches("^VAR19_[0-9]+_2$")))))
+sort(unique(unlist(select(df_clean, matches("^VAR19_[0-9]+_3$")))))
+```
+
+# Remove blank space in beginning and end of free text answer
+
+Applies to all medication free text columns (VAR19_1_1 to VAR19_10_3).
+
+```{r}
+df_clean <- df_clean %>%
+  mutate(across(starts_with("VAR19_"), trimws))
+```
+
+# Remove period at the end of free text answer
+
+```{r}
+df_clean <- df_clean %>%
+  mutate(across(starts_with("VAR19_"), function(x) trimws(str_remove(x, "\\.+$"))))
+```
+
+# Medication helper functions
+
+**Updated 2026-09-25:** Changed: the medication columns are now cleaned directly in df_clean, and the comparison uses the raw data in df_raw. Replaces the earlier section "Create new clean columns" with 30 separate clean columns.
+
+The medication columns VAR19_k_j are cleaned directly in df_clean, where k is the medication number (1 to 10) and j is the field (1 = drug, 2 = dosage, 3 = strength). The raw data in df_raw (Step 1) is never changed, so it is used as the reference for comparison.
+
+`comparison()` builds a comparison table with one row per person and medication (1 to 10): the raw free text from df_raw next to the cleaned value in df_clean. Empty medication slots are left out. Call it whenever you want to see how far the cleaning has come. It only reads from the data, it never changes it.
+
+`set_medication()` writes values for one person and one medication in df_clean. Use it for manual fixes, for example when dosage and strength are written in the same cell and you need to decide what goes where. Only the fields you give are changed. One call per fix, so every manual decision stays visible in the script.
+
+`move_mg_to_strength()` is used in the section "Strength typed into the dosage field" below.
+
+```{r}
+comparison <- function() {
+  # --- Troubleshooting checks: stop with a clear message if something is off ---
+
+  # 1. Both data frames must exist
+  if (!exists("df_raw"))   stop("df_raw does not exist. Run Step 1 first.")
+  if (!exists("df_clean")) stop("df_clean does not exist. Run Step 2 first.")
+
+  # 2. All 30 medication columns must exist in both data frames
+  expected_cols <- paste0("VAR19_", rep(1:10, each = 3), "_", rep(1:3, times = 10))
+  missing_raw   <- setdiff(expected_cols, names(df_raw))
+  missing_clean <- setdiff(expected_cols, names(df_clean))
+
+  if (length(missing_raw) > 0) {
+    stop("df_raw is missing ", length(missing_raw), " medication column(s): ",
+         paste(head(missing_raw, 5), collapse = ", "),
+         "\nVAR19 columns found in df_raw: ",
+         paste(head(grep("VAR19", names(df_raw), value = TRUE), 5), collapse = ", "))
+  }
+  if (length(missing_clean) > 0) {
+    stop("df_clean is missing ", length(missing_clean), " medication column(s): ",
+         paste(head(missing_clean, 5), collapse = ", "),
+         "\nVAR19 columns found in df_clean: ",
+         paste(head(grep("VAR19", names(df_clean), value = TRUE), 5), collapse = ", "))
+  }
+
+  # 3. Same persons in the same order
+  if (nrow(df_raw) != nrow(df_clean)) {
+    stop("df_raw has ", nrow(df_raw), " rows but df_clean has ", nrow(df_clean), " rows.")
+  }
+  if (!identical(as.character(df_raw$ID), as.character(df_clean$ID))) {
+    stop("df_raw and df_clean do not have the same persons in the same order.")
+  }
+
+  cat("Checks passed:", nrow(df_raw), "persons, all 30 medication columns found in df_raw and df_clean.\n")
+
+  tables <- list()
+
+  # One small table per medication (1 to 10), column names built from k,
+  # e.g. k = 3 gives VAR19_3_1 (drug), VAR19_3_2 (dosage), VAR19_3_3 (strength)
+  for (k in 1:10) {
+    drug_col     <- paste0("VAR19_", k, "_1")
+    dosage_col   <- paste0("VAR19_", k, "_2")
+    strength_col <- paste0("VAR19_", k, "_3")
+
+    tables[[k]] <- tibble(
+      ID = df_clean$ID, medication = k,
+      drug_raw     = df_raw[[drug_col]],    drug_clean     = df_clean[[drug_col]],
+      dosage_raw   = df_raw[[dosage_col]], dosage_clean  = df_clean[[dosage_col]],
+      strength_raw = df_raw[[strength_col]], strength_clean = df_clean[[strength_col]]
+    )
+  }
+
+  bind_rows(tables) %>%
+    filter(!is.na(drug_raw) | !is.na(dosage_raw) | !is.na(strength_raw)) %>%
+    arrange(ID, medication)
+}
+
+
+comparison()
+
+```
+
+```{r}
+
+set_medication <- function(df, id, medication, drug = NULL, dosage = NULL, strength = NULL) {
+  row <- which(df$ID == id)
+  if (length(row) != 1) stop("ID ", id, " matches ", length(row), " rows, expected 1.")
+
+  if (!is.null(drug))     df[[paste0("VAR19_", medication, "_1")]][row] <- drug
+  if (!is.null(dosage))   df[[paste0("VAR19_", medication, "_2")]][row] <- dosage
+  if (!is.null(strength)) df[[paste0("VAR19_", medication, "_3")]][row] <- strength
+
+  df
+}
+
+```
+
+```{r}
+
+# Whole cell is a number (decimals allowed) followed by mg or g, nothing else
+mg_only <- regex("^[0-9]+([.,][0-9]+)?\\s*(mg|g)$", ignore_case = TRUE)
+
+move_mg_to_strength <- function(df, medication) {
+  dosage_col   <- paste0("VAR19_", medication, "_2")
+  strength_col <- paste0("VAR19_", medication, "_3")
+
+  rows <- which(is.na(df[[strength_col]]) & str_detect(df[[dosage_col]], mg_only))
+
+  df[[strength_col]][rows] <- df[[dosage_col]][rows]
+  df[[dosage_col]][rows]   <- NA
+
+  df
+}
+```
+
+# Drug names
+
+**Updated 2026-09-25:** New section. Changed later the same day: writes directly to VAR19_k_1.
+
+All versions of drug names written in any of the 10 medication slots, with how many times each one occurs. Just a view.
+
+```{r}
+# matches("^VAR19_[0-9]+_1$") = all drug columns: VAR19_1_1, VAR19_2_1, ... VAR19_10_1
+all_drug_names <- unlist(select(df_clean, matches("^VAR19_[0-9]+_1$")))
+
+tibble(drug = all_drug_names) %>%
+  filter(!is.na(drug)) %>%
+  count(drug, sort = TRUE)
+```
+
+Translation table from each written version to one clean drug name. The same table is used for all 10 medications, so a misspelling only needs to be added once. Add one row per new version found in the view above. Brand names are translated to the active substance (e.g. Alvedon to Paracetamol).
+
+Before the table is used, every drug name is written with a capital first letter and small letters after ("alvedon" and "ALVEDON" both become "Alvedon"). So write the original in the table that way, and upper and lower case versions do not need their own rows.
+
+**The rows below come from the simulated test data. Replace them with the versions found in the real data in the TRE.**
+
+```{r}
+drug_lookup <- tribble(
+  ~original,      ~clean,
+  "Paracetamol",  "Paracetamol",
+  "Paracetamoll", "Paracetamol",
+  "Alvedon",      "Paracetamol",
+  "Panodil",      "Paracetamol",
+  "Ibuprofen",    "Ibuprofen",
+  "Ipren",        "Ibuprofen",
+  "Ibumetin",     "Ibuprofen",
+  "Tramadol",     "Tramadol",
+  "Tramdol",      "Tramadol",
+  "Tradolan",     "Tramadol",
+  "Morfin",       "Morfin",
+  "Oxynorm",      "Oxikodon",
+  "Oxykodon",     "Oxikodon",
+  "Pregabalin",   "Pregabalin",
+  "Lyrica",       "Pregabalin",
+  "Gabapentin",   "Gabapentin",
+  "Amitriptylin", "Amitriptylin",
+  "Saroten",      "Amitriptylin",
+  "Naproxen",     "Naproxen",
+  "Diklofenak",   "Diklofenak",
+  "Voltaren",     "Diklofenak"
+)
+```
+
+Translate the drug names for all 10 medications, using the table above. First capital first letter and small letters after, then the table. A version that is not in the table is kept as written.
+
+```{r}
+# matches("^VAR19_[0-9]+_1$") = all drug columns: VAR19_1_1, VAR19_2_1, ... VAR19_10_1
+df_clean <- df_clean %>%
+  mutate(across(matches("^VAR19_[0-9]+_1$"), str_to_sentence)) %>%
+  mutate(across(matches("^VAR19_[0-9]+_1$"), function(x)
+    coalesce(drug_lookup$clean[match(x, drug_lookup$original)], x)))
+```
+
+Drug names that are not handled yet: the cleaned name is not one of the clean names in the translation table. Add them to the table above, or fix them one by one with `set_medication()`.
+
+```{r}
+comparison() %>%
+  filter(!is.na(drug_clean) & !(drug_clean %in% drug_lookup$clean)) %>%
+  select(ID, medication, drug_raw, drug_clean)
+```
+
+# Ranges
+
+**Updated 2026-09-25:** Changed: applies to the dosage column of all 10 medications (VAR19_1_2 to VAR19_10_2), not only VAR19_1_2.
+
+```{r}
+# One to 4 per day
+# PLACEHOLDER: "fritext" does not occur in the data. Replace with the real versions.
+# matches("^VAR19_[0-9]+_2$") = all dosage columns: VAR19_1_2, VAR19_2_2, ... VAR19_10_2
+df_clean <- df_clean %>%
+  mutate(across(matches("^VAR19_[0-9]+_2$"), function(x) case_when(
+    x %in% c("fritext") ~ "0 to 4 per day",
+    TRUE ~ x
+  )))
+
+
+```
+
+# Number of doses
+
+**Updated 2026-09-25:** Changed: applies to the dosage column of all 10 medications (VAR19_1_2 to VAR19_10_2), not only VAR19_1_2.
+
+```{r}
+# 1 per day
+# PLACEHOLDER: "fritext" does not occur in the data. Replace with the real versions.
+# matches("^VAR19_[0-9]+_2$") = all dosage columns: VAR19_1_2, VAR19_2_2, ... VAR19_10_2
+df_clean <- df_clean %>%
+  mutate(across(matches("^VAR19_[0-9]+_2$"), function(x) case_when(
+    x %in% c("fritext") ~ "1 per day",
+    TRUE ~ x
+  )))
+
+
+```
+
+# Strength typed into the dosage field
+
+**Updated 2026-09-25:** New section. Replaces the earlier section "Free text for dosage contains mg-values".
+
+Some people wrote only the strength (a number followed by mg or g, e.g. "500 mg", "500mg" or "1 g") in the dosage field. That value is moved to the strength field for the same medication, and the dosage field is left empty. Only done when the strength field is empty, so nothing already written as strength is overwritten. One line per medication.
+
+```{r}
+# All 10 medications
+for (k in 1:10) df_clean <- move_mg_to_strength(df_clean, medication = k)
+```
+
+# Strength wording
+
+**Updated 2026-09-25:** New section.
+
+Runs after strength values have been moved from the dosage field, so the moved values are included. Same pattern as for dosage above, for the strength column of all 10 medications (VAR19_1_3 to VAR19_10_3). Add one line per clean value, with all versions that mean the same thing.
+
+```{r}
+# matches("^VAR19_[0-9]+_3$") = all strength columns: VAR19_1_3, VAR19_2_3, ... VAR19_10_3
+# The two rules below are examples from the simulated test data. Replace them with
+# the versions found in the real data in the TRE.
+df_clean <- df_clean %>%
+  mutate(across(matches("^VAR19_[0-9]+_3$"), function(x) case_when(
+    x %in% c("500mg", "500 mg")  ~ "500 mg",
+    x %in% c("1g", "1 g")        ~ "1 g",
+    TRUE ~ x
+  )))
+```
+
+# Dosage and strength in the same cell
+
+**Updated 2026-09-25:** New section. Replaces the earlier manual lines that wrote to row 7, 5 and 12 by row number.
+
+Dosage fields that still contain a strength (a number followed by mg or g) after the steps above, for example "1 x 3 500 mg". These need a manual decision about what goes in the dosage field and what goes in the strength field. Just a view.
+
+```{r}
+comparison() %>%
+  filter(str_detect(dosage_clean, regex("[0-9]\\s*(mg|g)\\b", ignore_case = TRUE))) %>%
+  select(ID, medication, dosage_raw, strength_raw, dosage_clean, strength_clean)
+```
+
+Write one line per person and medication, after reading the view above. Only the fields you give are changed.
+
+```{r}
+# Example: ID 12, medication 2, "1 x 3 500 mg" in the dosage field
+# df_clean <- set_medication(df_clean, id = 12, medication = 2, dosage = "1 x 3", strength = "500 mg")
+```
+
+# Compare raw and cleaned medication values
+
+**Updated 2026-09-25:** New section.
+
+A comparison table with one row per person and medication (1 to 10): the raw free text from df_raw next to the cleaned value in df_clean. Empty medication slots are left out. The table is a separate object, so it is not part of the final output. Open it with View(medication_comparison).
+
+```{r}
+medication_comparison <- comparison()
+
+medication_comparison
+```

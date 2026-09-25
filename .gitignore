@@ -1,9 +1,8 @@
-*.zip
-*.tmp
-~$*
-data
-docs
-Gammal kod
-
-# Data files
-NULLdata_MenWomen_Baseline_Facebook_250401.xlsx
+# Only the three scripts are shared. Everything else stays on this computer.
+/*
+!/.gitignore
+!/main.R
+!/PainSense - Data Transformation.qmd
+!/docs/
+/docs/*
+!/docs/Data Cleaning.qmd
